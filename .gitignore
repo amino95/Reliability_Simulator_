@@ -3,3 +3,7 @@ Results/*
 venv/*
 .git/*
 models/__pycache__/*
+venv/
+ENV/
+env/
+.env/
