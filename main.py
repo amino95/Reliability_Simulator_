@@ -97,7 +97,6 @@ for j in range(REPEAT_EXPERIENCE):
                     solvers_inputs[i]["sigma"],
                     solvers_inputs[i]["rejection_penalty"],
                     solvers_inputs[i]["gamma"],
-
                     solvers_inputs[i]["learning_rate"],
                     solvers_inputs[i]["memory_size"],
                     solvers_inputs[i]["batch_size"],
@@ -115,10 +114,21 @@ for j in range(REPEAT_EXPERIENCE):
                 )
             )
 
+        if solvers_inputs[i]["type"] == "GRASP":
+            print('GRASP Solver')
+            solvers.append(
+                Grasp(
+                    solvers_inputs[i]["sigma"],
+                    solvers_inputs[i]["rejection_penalty"],
+                    solvers_inputs[i]["nIterations"],
+                    solvers_inputs[i]["lambda"]
+                )
+            )
+            sns.append(dc(old_subNet))
+            solvers_names.append(solvers_inputs[i]["name"])
+
         if solvers_inputs[i]["type"] == "GNNDQN":
             print('GNNDQN_Optimized Solver')
-
-
             solvers.append(
                 GNNDQN(
                     solvers_inputs[i]["sigma"],
@@ -141,21 +151,9 @@ for j in range(REPEAT_EXPERIENCE):
             sns.append(dc(old_subNet))
             solvers_names.append(solvers_inputs[i]["name"])
 
-        if solvers_inputs[i]["type"] == "GRASP":
-            # print('GRASP Solver')
-            solvers.append(
-                Grasp(
-                    solvers_inputs[i]["sigma"],
-                    solvers_inputs[i]["rejection_penalty"],
-                    solvers_inputs[i]["max_iter"],
-                    solvers_inputs[i]["alpha"]
-                )
-            )
-            sns.append(dc(old_subNet))
-            solvers_names.append(solvers_inputs[i]["name"])
 
         if solvers_inputs[i]["type"] == "FF":
-            # print('FF Solver')
+            print('FF Solver')
             solvers.append(
                 FirstFit(
                     solvers_inputs[i]["sigma"],

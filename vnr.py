@@ -272,22 +272,32 @@ class VNR:
 
     def getFeatures(self):
         """
-        Extracts scaled features for VNR nodes.
+        Extracts scaled features for VNR nodes, including reliability requirements.
         """
+        # Utilisation de float32 pour la compatibilité avec les réseaux de neurones
 
-        # Always convert to float32 BEFORE dividing
+        # 1. CPU
         cpu = np.array([el.cpu for el in self.vnode], dtype=np.float32)
         cpu /= cpu.max() if cpu.max() != 0 else 1
         cpu = cpu.reshape(1, -1)
 
+        # 2. Bandwidth (Aggregated)
         bw = np.array([el.bw for el in self.vnode], dtype=np.float32)
         bw /= bw.max() if bw.max() != 0 else 1
         bw = bw.reshape(1, -1)
 
+        # 3. Reliability Requirement (Nouveau)
+        # On récupère la fiabilité demandée par chaque nœud virtuel
+        rel = np.array([el.rel for el in self.vnode], dtype=np.float32)
+        rel /= rel.max() if rel.max() != 0 else 1
+        rel = rel.reshape(1, -1)
+
+        # 4. Avg BW / degree
         bw_av = np.array([el.bw / el.degree for el in self.vnode], dtype=np.float32)
         bw_av /= bw_av.max() if bw_av.max() != 0 else 1
         bw_av = bw_av.reshape(1, -1)
 
+        # 5. Max / Min BW
         bw_max = np.array([el.max_bw(self.vedege) for el in self.vnode], dtype=np.float32)
         bw_max /= bw_max.max() if bw_max.max() != 0 else 1
         bw_max = bw_max.reshape(1, -1)
@@ -296,24 +306,23 @@ class VNR:
         bw_min /= bw_min.max() if bw_min.max() != 0 else 1
         bw_min = bw_min.reshape(1, -1)
 
-        # rel = np.array([el.max_rel(self.vedege) for el in self.vnode], dtype=np.float32)
-        # rel /= rel.max() if rel.max() != 0 else 1
-        # rel = rel.reshape(1, -1)
-
+        # 6. Degree
         degree = np.array([el.degree for el in self.vnode], dtype=np.float32)
         degree /= degree.max() if degree.max() != 0 else 1
         degree = degree.reshape(1, -1)
 
+        # 7. Priority / Load factor (p_maxCpu)
         p_maxCpu = np.array([el.p_maxCpu for el in self.vnode], dtype=np.float32)
         p_maxCpu /= p_maxCpu.max() if p_maxCpu.max() != 0 else 1
         p_maxCpu = p_maxCpu.reshape(1, -1)
 
-        # Final feature stacking
+        # Empilage final des caractéristiques
+        # ATTENTION : L'ordre doit correspondre à celui attendu par votre agent RL
         features = np.concatenate(
-            (cpu, bw, bw_av, bw_max, bw_min, rel, degree, p_maxCpu),
+            (cpu, bw, rel, bw_av, bw_max, bw_min, degree, p_maxCpu),
             axis=0
         ).T
-        # print('features', features)
+        # features = cpu, bw, rel, bw_av, bw_max, bw_min, degree, p_maxCpu
         return features
 
     def getFeatures2(self):

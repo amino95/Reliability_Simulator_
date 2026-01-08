@@ -1092,41 +1092,32 @@ class GlobalSolver():
         self.solvers = solvers
 
     def mapping(self, states):
-        """
-        Version robuste : traite chaque état (VNR) avec le solveur approprié
-        sans dépasser les limites des listes.
-        """
         results = []
 
-        # On boucle sur les REQUÊTES (states) reçues
         for i in range(len(states)):
-            # --- PROTECTION INDEX ---
-            # Si on a moins de solveurs que de requêtes, on réutilise le dernier
-            # ou le premier solveur disponible (cas fréquent en RL)
+            # Sélection du solveur (fallback sur le premier si index out of range)
             solver_index = i if i < len(self.solvers) else 0
             current_solver = self.solvers[solver_index]
 
-            # Appel du mapping initial
-            results_i = current_solver.mapping(states[i]['sn'], states[i]['vnr'])
-            results.append(results_i)
+            # Premier essai de mapping
+            # On stocke directement dans results pour pouvoir utiliser results[-1]
+            results.append(current_solver.mapping(states[i]['sn'], states[i]['vnr']))
 
-            # --- LOGIQUE D'ITÉRATION (GRASP / Heuristiques) ---
-            # On utilise results[-1] pour pointer sur le dernier résultat ajouté
             iteration = 1
-            max_iter = getattr(current_solver, "max_iteration", 1)
+            # Correction du NoneType pour max_iteration
+            raw_max_iter = getattr(current_solver, "max_iteration", 1)
+            max_iter = raw_max_iter if raw_max_iter is not None else 1
 
-            # Tant que l'échec persiste et qu'on a un budget d'itérations
-            while (not results[-1]["success"]
-                   and iteration < max_iter):
-                # Relance le mapping (utile pour les algos stochastiques comme GRASP)
+            # BOUCLE D'ITÉRATION (GRASP / Heuristiques)
+            # Ajout d'une sécurité : vérifie si "success" existe dans le dictionnaire
+            while (not results[-1].get("success", False) and iteration < max_iter):
                 results[-1] = current_solver.mapping(states[i]['sn'], states[i]['vnr'])
                 iteration += 1
 
-            # Enregistre le nombre d'essais effectués
+            # Enregistre le nombre final d'essais
             results[-1]['nb_iter'] = iteration
 
         return results
-
     def scaling_down(self,i,vnr,sn,scaling_chaine):
         """
         Perform a scaling down operation using the ith solver.
