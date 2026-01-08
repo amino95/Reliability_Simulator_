@@ -2,7 +2,7 @@ from generator import *
 from mano import ManoSimulator
 from solver import *
 from substrate import SN
-import matplotlib.pyplot as plt
+from grasp import Grasp
 from termcolor import colored
 import simpy
 import pickle
@@ -11,6 +11,10 @@ import copy
 import json
 from controller import Global_controller as Controller
 import time
+import warnings
+from models.GNNDQN_GRASP import GNNDQN_GRASP
+
+warnings.filterwarnings("ignore", message="TypedStorage is deprecated")
 
 # to measure exec time 
 from timeit import default_timer as timer 
@@ -30,12 +34,17 @@ cpu_range = json_object['cpu_range']
 numnodes = json_object['numnodes']
 bw_range = json_object['bw_range']
 lt_range = json_object['lt_range']
+rel_range = json_object['rel_range']
+
 # Virtual network related parameters
 num_reqs = json_object['num_reqs'] # number of simultaneous requests for the vnr generator
 vnfs_range =json_object['vnfs_range']
 vcpu_range =json_object['vcpu_range']
 vbw_range =json_object['vbw_range']
 vlt_range = json_object['vlt_range']
+vrel_range = json_object['vrel_range']
+
+
 start_mean_calculation=json_object['start_mean_calculation']
 MTBA = json_object['MTBA']     # Mean Time Between Arrival
 MLT=json_object['MLT']         # Mean life time of each cass of VNR
@@ -57,10 +66,10 @@ Seeds = np.random.randint(42947296, size=REPEAT_EXPERIENCE) #Seeds = [317805,767
 # Create a substrate environment
 topology  = 'generated_network.matrix'
 topology =  nx.Graph(np.loadtxt(topology, dtype=int))
-old_subNet= SN(numnodes, cpu_range, bw_range,lt_range,topology)
+old_subNet = SN(numnodes, cpu_range, bw_range,lt_range,rel_range, topology)
 
-old_subNet.drawSN(edege_label=True)
-old_subNet.msg()
+#old_subNet.drawSN(edege_label=True)
+#old_subNet.msg()
 
 
 
@@ -70,32 +79,103 @@ with open('topology.pkl', 'wb') as output:
 total_duration = 0
 print(colored('Experience started', 'green'))
 for j in range(REPEAT_EXPERIENCE):
-    print('%d' % j)
+    print('Episode %d' % j)
     np.random.seed(Seeds[j]) #seed=np.random.randint(Seeds[j], size=REPEAT_EXPERIENCE)
     
     env = simpy.Environment()
-    solvers=[]
-    solvers_names=[]
-    sns=[]
+    solvers = []
+    solvers_names = []
+    sns = []
+
     for i in range(len(solvers_inputs)):
-        sns.append(dc(old_subNet))
-        solvers_names.append(solvers_inputs[i]["name"])
-        if solvers_inputs[i]["type"]=="FF":
-            solvers.append(FirstFit(solvers_inputs[i]["sigma"],solvers_inputs[i]["rejection_penalty"]))
-        if solvers_inputs[i]["type"]=="GNNDRL":
-            solvers.append(GNNDRL(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"] ))
-        if solvers_inputs[i]["type"]=="GNNDRL2":
-            solvers.append(GNNDRL2(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"] ))
-      
+
+        if solvers_inputs[i]["type"] == "GNNDQN_GRASP":
+            print('GNNDQN_GRASP Solver')
+
+            solvers.append(
+                GNNDQN_GRASP(
+                    solvers_inputs[i]["sigma"],
+                    solvers_inputs[i]["rejection_penalty"],
+                    solvers_inputs[i]["gamma"],
+
+                    solvers_inputs[i]["learning_rate"],
+                    solvers_inputs[i]["memory_size"],
+                    solvers_inputs[i]["batch_size"],
+                    solvers_inputs[i]["epsilon"],
+                    solvers_inputs[i]["eps_min"],
+                    solvers_inputs[i]["eps_dec"],
+                    solvers_inputs[i]["num_inputs_sn"],
+                    solvers_inputs[i]["num_inputs_vnr"],
+                    solvers_inputs[i]["hidden_size"],
+                    solvers_inputs[i]["GCN_out"],
+                    solvers_inputs[i]["num_actions"],
+                    solvers_inputs[i]["max_iteration_gp"],
+                    solvers_inputs[i]["alpha"],
+                    solvers_inputs[i]["max_iteration"],
+                )
+            )
+
+        if solvers_inputs[i]["type"] == "GNNDQN":
+            print('GNNDQN_Optimized Solver')
+
+
+            solvers.append(
+                GNNDQN(
+                    solvers_inputs[i]["sigma"],
+                    solvers_inputs[i]["gamma"],
+                    solvers_inputs[i]["rejection_penalty"],
+                    solvers_inputs[i]["learning_rate"],
+                    solvers_inputs[i]["epsilon"],
+                    solvers_inputs[i]["memory_size"],
+                    solvers_inputs[i]["batch_size"],
+                    solvers_inputs[i]["num_inputs_sn"],
+                    solvers_inputs[i]["num_inputs_vnr"],
+                    solvers_inputs[i]["hidden_size"],
+                    solvers_inputs[i]["GCN_out"],
+                    solvers_inputs[i]["num_actions"],
+                    solvers_inputs[i]["max_iteration"],
+                    solvers_inputs[i]["eps_min"],
+                    solvers_inputs[i]["eps_dec"]
+                )
+            )
+            sns.append(dc(old_subNet))
+            solvers_names.append(solvers_inputs[i]["name"])
+
+        if solvers_inputs[i]["type"] == "GRASP":
+            # print('GRASP Solver')
+            solvers.append(
+                Grasp(
+                    solvers_inputs[i]["sigma"],
+                    solvers_inputs[i]["rejection_penalty"],
+                    solvers_inputs[i]["max_iter"],
+                    solvers_inputs[i]["alpha"]
+                )
+            )
+            sns.append(dc(old_subNet))
+            solvers_names.append(solvers_inputs[i]["name"])
+
+        if solvers_inputs[i]["type"] == "FF":
+            # print('FF Solver')
+            solvers.append(
+                FirstFit(
+                    solvers_inputs[i]["sigma"],
+                    solvers_inputs[i]["rejection_penalty"]
+                )
+            )
+            sns.append(dc(old_subNet))
+            solvers_names.append(solvers_inputs[i]["name"])
+
+
     controller=Controller(solvers_names,sns,env,episode_duration,results_location,episode_per_file,max_vnfs)
     global_solver=GlobalSolver(solvers)
     manoSimulator=ManoSimulator(global_solver,solvers_names,sns,env,controller)
     start=time.time()
-    generator=Generator(vnr_classes, MLT, MTBS, MTBA[0], vnfs_range, vcpu_range, vbw_range,vlt_range, flavor_tab, p_flavors,len(solvers_inputs)) #j
+    generator=Generator(vnr_classes, MLT, MTBS, MTBA[0], vnfs_range, vcpu_range, vbw_range,vlt_range, vrel_range, flavor_tab, p_flavors,len(solvers_inputs))
     env.process(generator.VnrGenerator_poisson(env,manoSimulator))
     env.process(controller.simulation_controller())
-    # Execute!
+
     env.run(until=SIM_TIME[0]) #j
+
     duration = time.time()-start
     print(duration)
     total_duration += duration

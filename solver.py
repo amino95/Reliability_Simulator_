@@ -32,7 +32,7 @@ class Solver():
         self.itteration = False
         """ A boolean indicating if the solver has multiple attempts to place the VNR: 
         False if the solver has a single chance, True if it can try multiple times. """
-        self.max_itteration = None
+        self.max_iteration = None
         """ The maximum number of attempts given to the solver to find a feasible placement. 
         It is None if the iteration variable is False, or a positive integer if True"""
         self.sigma=sigma
@@ -183,232 +183,171 @@ class Solver():
   
             ve2seindex.append(pathindex)
         return success,ve2seindex
-    
-    def getReward(self,vnr,sn):
+
+    def calculate_reliability(self, vnr, sn):
         """
-        Calculates the reward for placing a virtual network request (VNR) in the substrate network. 
-        The reward is computed as: Reward = sigma * R2C + (1 - sigma) * e^(-p_load)
+        Compute total path reliability of a VNR.
+        Reliability = ∏(edge reliabilities) aggregated over all virtual links.
+        """
 
-        Args:
-            vnr: The virtual network request 
-            sn: The substrate network
+        total_rel = 1.0
 
-        Returns:
-            tuple: A tuple containing:
-                - r2c (float): The revenue-to-cost ratio for the placement of the VNR.
-                - p_load (float): The average p_load of the substrate nodes involved in the VNR placement.
-                - reward (float): The calculated reward based on the revenue-to-cost ratio and the average p_load.
-        """    
-        r2c=self.rev2cost(vnr)
-        p_load=0
-        for i in range(vnr.num_vnfs):
-            p_load=p_load+sn.snode[vnr.nodemapping[i]].p_load
-        p_load=p_load/vnr.num_vnfs
-        return r2c,p_load,self.sigma*r2c+(1-self.sigma)/math.exp(p_load)
-    
-    
+        for i, v_edge in enumerate(vnr.vedege):
+            spc = v_edge.spc
+            if not spc:  # unmapped
+                return 0.0
+
+            path_rel = 1.0
+            for e_idx in spc:
+                sedge = sn.sedege[e_idx]
+                path_rel *= sedge.rel
+
+            # Multiply over all virtual links
+            total_rel *= path_rel
+
+        return total_rel
+    def getReward(self, vnr, sn):
+        """
+        Compute (R2C, p_load, reliability, reward)
+        Clean, normalized, RL-friendly reward function.
+        """
+
+        # ------------------------------------------------------------------
+        # 1) Compute R2C
+        # ------------------------------------------------------------------
+
+        R2C = self.rev2cost(vnr)
+        R2C = max(0.0, min(1.0, R2C))  # normalize to [0,1]
+
+        # ------------------------------------------------------------------
+        # 2) Compute p_load (load balancing)
+        # ------------------------------------------------------------------
+        loads = np.array([el.p_load for el in sn.snode])
+        p_load = loads.mean() if len(loads) > 0 else 0.0
+        p_load = max(0.0, min(1.0, p_load))
+
+        # ------------------------------------------------------------------
+        # 3) Compute end-to-end reliability
+        # ------------------------------------------------------------------
+        rel_list = []
+
+        # VNF NODE RELIABILITY
+        for idx, host in enumerate(vnr.nodemapping):
+            if host < 0:
+                continue
+            rel_list.append(sn.snode[host].rel)
+
+        # EDGE RELIABILITY (multiplicative)
+        for e in vnr.vedege:
+            if len(e.spc) == 0:
+                continue
+            r_edge = 1.0
+            for edge_id in e.spc:
+                r_edge *= sn.sedege[edge_id].rel
+            rel_list.append(r_edge)
+
+        if len(rel_list) > 0:
+            reliability = float(np.prod(rel_list) ** (1.0 / len(rel_list)))
+        else:
+            reliability = 0.0
+
+        reliability = max(0.0, min(1.0, reliability))
+
+        # ------------------------------------------------------------------
+        # 4) Reward combination (RL-friendly)
+        # ------------------------------------------------------------------
+        # Weighted geometric mean (safer & better for RL)
+        # reward = (
+        #         0.5 * R2C +
+        #         0.3 * reliability +
+        #         0.2 * (1 - p_load)  # lower load = better
+        # )
+        reward_unnorm = (0.7 * reliability) + (0.3 * R2C)
+        reward = max(0.0, min(1.0, reward_unnorm))
+
+
+        return R2C, p_load, reliability, reward
+
+
 class GNNDQN(Solver):
-    
-    def __init__(self,sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec ):
-        super().__init__(sigma,rejection_penalty)
-        
-        self.saved_reward= None
-        """ 
-        A variable used to store the reward from the last placement. 
-        This reward will be used to save a transition in the agent's memory. 
-        A transition consists of a sequence of steps, where each step corresponds to a VNF placement. 
-        It includes the observation (the system state), the action taken, the reward received, 
-        and a boolean indicating if all VNFs have been placed.
-        """
-        self.saved_observation= None
-        """ 
-        A variable used to store the observation from the last placement. 
-        This observation will be used to save a transition in the agent's memory. 
-        A transition consists of a sequence of steps, where each step corresponds to a VNF placement. 
-        It includes the observation (the system state), the action taken, the reward received, 
-        and a boolean indicating if all VNFs have been placed.
-        """
-        self.saved_action= None
-        """ 
-        A variable used to store the action taken from the last placement. 
-        This action will be used to save a transition in the agent's memory. 
-        A transition consists of a sequence of steps, where each step corresponds to a VNF placement. 
-        It includes the observation (the system state), the action taken, the reward received, 
-        and a boolean indicating if all VNFs have been placed.
-        """
-        self.saved_done= None
-        """ 
-        A boolean used to store the variable done from the last placement. 
-        This boolean will be used to save a transition in the agent's memory. 
-        A transition consists of a sequence of steps, where each step corresponds to a VNF placement. 
-        It includes the observation (the system state), the action taken, the reward received, 
-        and a boolean indicating if all VNFs have been placed.
-        """
-        self.agent=DQNAgent(gamma, learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,eps_min, eps_dec )
-        """ The DRL Agent, here it is a DQN Agent that uses DQN to learn"""
+
+    def __init__(self, sigma, gamma, rejection_penalty,
+                     learning_rate, epsilon, memory_size, batch_size,
+                     num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out,
+                     num_actions, max_iteration, eps_min, eps_dec):
+        super().__init__(sigma, rejection_penalty)
+
+            # DRL agent
+        self.agent = DQNAgent(gamma, learning_rate, epsilon, memory_size, batch_size,
+                num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out,
+                num_actions, eps_min, eps_dec
+            )
+
+        # Ces variables peuvent servir pour du logging ou du multi-episode
+        self.saved_reward = None
+        self.saved_observation = None
+        self.saved_action = None
+        self.saved_done = None
         self.saved_transition = None
-        """ A transition consists of a sequence of steps, where each step corresponds to a VNF placement. 
-        It includes the observation (the system state), the action taken, the reward received, 
-        and a boolean indicating if all VNFs have been placed. We use this variable to save a transition of the last placement.  """
-        
-        self.itteration = True
-        """ A boolean indicating whether this solver has more than one chance to attempt finding a placement. """
-        
-        self.max_itteration = max_itteration
-        """  The maximum number of iterations allowed to find a feasible placement. """
 
+        self.iteration = True
+        self.max_iteration = max_iteration
 
-    def mapping(self, sn, vnr):
-            """
-            This function performs the mapping of a VNR's virtual nodes (VNFs) and virtual edges onto the substrate network (SN).
+    # ------------------------------------------------------------------
+    #  Helpers pour observations
+    # ------------------------------------------------------------------
+    def make_observation(self, sn, vnr, vnf_idx):
+        """
+        Construit une observation DGL valide pour (sn, vnr, vnf_idx).
+        """
+        sn_graph = SnDGLgraph(sn, vnr.vnode[vnf_idx].cpu, device=device)
+        vnr_graph = DGLgraph(vnr, device=device)
+        return Observation(sn_graph, vnr_graph, vnf_idx, vnr.nodemapping[:vnf_idx])
 
-            It uses a reinforcement learning agent to iteratively place each VNF, checking if both node and edge mappings are feasible.
-            If the mapping is successful, it calculates the reward based on R2C and  p_load .
+    def make_terminal_observation(self, sn, vnr):
+        """
+        Observation terminale (état final) - évite d'avoir next_obs = None.
+        """
+        sn_graph = SnDGLgraph(sn, 0, device=device)
+        vnr_graph = DGLgraph(vnr, device=device)
+        return Observation(sn_graph, vnr_graph, -1, vnr.nodemapping)
 
-            Args:
-            - sn: The substrate network (SN) object.
-            - vnr: The virtual network request (VNR) object.
-
-            Returns: A dictionary containing the following keys:
-
-            1. success (bool): Indicates if the mapping was successful.
-                - True: All VNFs and edges were mapped successfully.
-                - False: Mapping failed for at least one VNF or edge.
-            2. nodemapping (list): The mapping of VNR's virtual nodes (VNFs) to substrate nodes.
-                - Non-empty list if mapping is successful; empty if not.
-            3. edgemapping (list): The mapping of VNR's virtual edges (VLinks) to substrate edges.
-                - Non-empty list if mapping is successful; empty if not.
-            4. nb_vnfs (int): The number of successfully mapped VNFs.
-                - Number of VNFs in VNR if successful, 0 if not.
-            5. nb_vls (int): The number of successfully mapped virtual links (edges).
-                - Number of VLinks in VNR if successful, 0 if not.
-            6. R2C (float): The calculated revenue-to-cost ratio for the mapping.
-                - 0 if mapping is unsuccessful.
-            7. p_load (float): The average p_load of the mapped nodes.
-                - 0 if mapping is unsuccessful.
-            8. reward (float): The reward value calculated based on the mapping success.
-                - The rejection penalty if mapping is unsuccessful.
-            9. sn (object): The current state of the substrate network.
-            10. cause (str): The reason for mapping failure, "node" or "edge".
-                - None if mapping is successful
-            11. nb_iter (int): The number of iterations taken to find a mapping.
-                - 0 for both successful and unsuccessful mappings, an it will be updated by the global solver that calculates the number of itteration 
-            """
-            r2c=0
-            p_load = 0
-            success=False
-            cause = None
-            num_vnfs=vnr.num_vnfs
-            ve2seindex=[-1]*vnr.num_vedges 
-            vnr.nodemapping=[-1]*num_vnfs
-            sn_c=dc(sn)
-            sn_graph=SnDGLgraph(sn_c,vnr.vnode[0].cpu, device=device)
-            vnr_graph=DGLgraph(vnr, device=device)
-            obs=Observation(sn_graph, vnr_graph, 0, [])
-            transition= DQNTransition()
-            if self.saved_transition != None:
-                self.saved_transition.store_step(self.saved_observation,self.saved_action,self.saved_reward, True,obs)
-                self.agent.store_transition(self.saved_transition)
-                self.agent.learn()
-        
-            for idx in range(num_vnfs):
-                nsuccess,action,v2sindex_c=self.nodemapping(obs,sn_c,vnr,idx)
-
-                if nsuccess:
-                    if idx>0:
-                       
-                        nodes_mapped=[i for i in range(idx+1)]
-                        vsuccess=self.edegemapping(sn_c, vnr,idx,nodes_mapped,ve2seindex) 
-                        if vsuccess:
-                            if idx == num_vnfs-1:
-
-                                success= True
-                                r2c,p_load,self.saved_reward=self.getReward(vnr, sn_c)
-                                self.saved_observation=dc(obs)
-                                self.saved_action=action
-                                self.saved_done=True
-                                self.saved_transition = transition
-
-                                vnr.edgemapping=ve2seindex
-               
-                            else:
-                                reward=0
-                                sn_graph=SnDGLgraph(sn_c,vnr.vnode[idx+1].cpu, device=device)
-                                vnr_graph=DGLgraph(vnr, device=device)
-                                new_obs=Observation(sn_graph, vnr_graph, idx+1,vnr.nodemapping[:idx+1])
-                                transition.store_step(obs,action,reward, False,new_obs)
-                                obs=new_obs
-                        else:
-                           
-                            cause = 'edge'
-                            self.saved_reward=self.rejection_penalty 
-                            self.saved_observation= dc(obs)
-                            self.saved_action= action
-                            self.saved_done= False 
-                            self.saved_transition = transition
-                            success=False
-                            break
-                            
-                            
-                    else:
-                        reward=0
-                        sn_graph=SnDGLgraph(sn_c,vnr.vnode[idx+1].cpu, device=device)
-                        vnr_graph=DGLgraph(vnr, device=device)
-                        new_obs=Observation(sn_graph, vnr_graph, idx+1,vnr.nodemapping[:idx+1])
-                        transition.store_step(obs,action,reward, False,new_obs)
-                        obs=new_obs
-
-                else:
-                    self.saved_reward=self.rejection_penalty 
-                    self.saved_observation=dc(obs)
-                    self.saved_action=action
-                    self.saved_done=False
-                    self.saved_transition = transition
-                    success=False
-                    cause = 'node'
-                    break
-                    
-            if success:
-
-                results={'success':success,'nodemapping':vnr.nodemapping,'edgemapping':vnr.edgemapping,'nb_vnfs':vnr.num_vnfs,"nb_vls":vnr.num_vedges,'R2C':r2c,'p_load':p_load,'reward':self.saved_reward,'sn':sn_c,'cause':None,'nb_iter':0}
-                return results
-            else : 
-                results={'success':success,'nodemapping':[],'edgemapping':[],'nb_vnfs':0,"nb_vls":0,'R2C':0,'p_load':0,'reward':self.rejection_penalty ,'sn':sn,'cause':cause,'nb_iter':0}
-                return results
-            
-           
-    def nodemapping(self,observation,sn,vnr,idx):
-        """ 
+    # ------------------------------------------------------------------
+    #  Node mapping avec RL + fallback
+    # ------------------------------------------------------------------
+    def nodemapping(self, observation, sn, vnr, idx):
+        """
         Maps a virtual node (VNF) to a substrate node in the network.
 
         Parameters:
-            observation: The current state observation of the system, see observation class for more details 
+            observation: The current state observation of the system, see observation class for more details
             sn: The substrate network.
             vnr: The virtual network request.
             idx: The index of the VNF in the virtual network.
 
         Returns:
             nsuccess (bool): Indicates if the mapping was successful (True) or not (False).
-            action (int): The index of the substrate node selected for mapping the VNF. 
+            action (int): The index of the substrate node selected for mapping the VNF.
                         Returns -1 if mapping fails.
             value: The value associated with the chosen action (from the agent).
             log_prob: The log probability of the action taken (from the agent).
             vnr.nodemapping (list): Updated mapping of VNR nodes to substrate nodes.
         """
-        nsuccess=True
-        action=self.agent.choose_action(observation,vnr.vnode[idx].cpu,sn.getCpu())
-        if action>=0 and sn.snode[action].lastcpu> vnr.vnode[idx].cpu:
-            sn.snode[action].lastcpu-=vnr.vnode[idx].cpu
-            sn.snode[action].vnodeindexs.append([vnr.id,idx])
-            sn.snode[action].p_load=(sn.snode[action].p_load*sn.snode[action].cpu+vnr.vnode[idx].p_maxCpu)/sn.snode[action].cpu
-            vnr.nodemapping[idx]=action
-            vnr.vnode[idx].sn_host=action
+        nsuccess = True
+        action = self.agent.choose_action(observation, vnr.vnode[idx].cpu, sn.getCpu())
+        if action >= 0 and sn.snode[action].lastcpu > vnr.vnode[idx].cpu:
+            sn.snode[action].lastcpu -= vnr.vnode[idx].cpu
+            sn.snode[action].vnodeindexs.append([vnr.id, idx])
+            sn.snode[action].p_load = (sn.snode[action].p_load * sn.snode[action].cpu + vnr.vnode[idx].p_maxCpu) / \
+                                      sn.snode[action].cpu
+            vnr.nodemapping[idx] = action
+            vnr.vnode[idx].sn_host = action
         else:
-            nsuccess=False
-        return nsuccess,action,vnr.nodemapping
-         
-    def edegemapping(self,sn,vnr,idx,nodes_mapped,ve2seindex):
-        """ 
+            nsuccess = False
+        return nsuccess, action, vnr.nodemapping
+
+    def edegemapping(self, sn, vnr, idx, nodes_mapped, ve2seindex):
+        """
         Maps the edges that link mapped VNFs to the VNF idx
 
         Parameters:
@@ -421,100 +360,168 @@ class GNNDQN(Solver):
         Returns:
             success (bool): Indicates if the edge mapping was successful (True) or not (False).
         """
-        success=True
-        neighbors=vnr.vnode[idx].neighbors
-        mapped=nodes_mapped
-        intersection= np.intersect1d(neighbors,mapped)
+        success = True
+        neighbors = vnr.vnode[idx].neighbors
+        mapped = nodes_mapped
+        intersection = np.intersect1d(neighbors, mapped)
         for i in intersection:
-            if idx< i :
-                s=idx
-                d=i
-            else: 
-                s=i
-                d=idx
-            edege_list=list(vnr.graph.edges())
-            index=edege_list.index((s,d))
-            bw=vnr.vedege[index].bandwidth
-            fromnode=vnr.nodemapping[s]
-            tonode=vnr.nodemapping[d]
-            g=self.Sn2_networkxG(sn.snode,sn.sedege,bw)
-            pathindex,cost=self.shortpath(g,fromnode,tonode,weight=None)
+            if idx < i:
+                s = idx
+                d = i
+            else:
+                s = i
+                d = idx
+            edege_list = list(vnr.graph.edges())
+            index = edege_list.index((s, d))
+            bw = vnr.vedege[index].bandwidth
+            fromnode = vnr.nodemapping[s]
+            tonode = vnr.nodemapping[d]
+            g = self.Sn2_networkxG(sn.snode, sn.sedege, bw)
+            pathindex, cost = self.shortpath(g, fromnode, tonode, weight=None)
             if not pathindex:
                 return False
             for j in pathindex:
-                sn.sedege[j].lastbandwidth-=vnr.vedege[index].bandwidth
-                sn.sedege[j].vedegeindexs.append([vnr.id,index])
-                nodeindex=sn.sedege[j].nodeindex
-                sn.snode[nodeindex[0]].lastbw-=vnr.vedege[index].bandwidth
-                sn.snode[nodeindex[1]].lastbw-=vnr.vedege[index].bandwidth
+                sn.sedege[j].lastbandwidth -= vnr.vedege[index].bandwidth
+                sn.sedege[j].vedegeindexs.append([vnr.id, index])
+                nodeindex = sn.sedege[j].nodeindex
+                sn.snode[nodeindex[0]].lastbw -= vnr.vedege[index].bandwidth
+                sn.snode[nodeindex[1]].lastbw -= vnr.vedege[index].bandwidth
             vnr.vedege[index].spc = pathindex
-            ve2seindex[index]=pathindex
+            ve2seindex[index] = pathindex
         return success
 
 
-    def scaling_down(self,vnr,sn,scaling_chaine):
-        """ 
-        Scales down the resource allocation for the virtual nodes in the VNR.
 
-        This function updates the CPU resources of the virtual nodes and the 
-        corresponding substrate nodes when scaling down. It reduces the CPU 
-        allocation for each virtual node specified in the scaling chain and 
-        increases the available CPU resources in the corresponding substrate node.
-
-        Parameters:
-            vnr: The virtual network request.
-            sn: The substrate network containing the substrate nodes.
-            scaling_chaine: A list of indices representing the virtual nodes that need to be scaled down.
-
-        Returns:
-            sn: The updated substrate network after scaling down the resources.
+    def mapping(self, sn, vnr):
         """
-        for i in scaling_chaine:
-            vnr.vnode[i].cpu-=vnr.vnode[i].req_cpu
-            sn.snode[vnr.vnode[i].sn_host].lastcpu+=vnr.vnode[i].req_cpu
-        return sn     
-               
-    def scaling_up(self,vnr,sn,scaling_chaine):
-        """ 
-        Scales up the resource allocation for the virtual nodes in the VNR.
-
-        This function attempts to increase the CPU resources for each virtual node specified 
-        in the scaling chain. If the corresponding substrate node has sufficient CPU 
-        resources available, the function updates both the substrate node and the virtual 
-        node's CPU allocation. If any virtual node cannot be scaled up due to resource 
-        constraints, it returns a failure status.
-
-        Parameters:
-            vnr: The virtual network request.
-            sn: The substrate network.
-            scaling_chaine: A list of indices representing the virtual nodes that need to be scaled up.
-
-        Returns:
-            dict: A dictionary containing:
-                - "success": A boolean indicating whether the scaling operation was successful.
-                - "sn": The updated substrate network.
-                - "vnr": The updated virtual network request.
+        GNNDQN mapping:
+            - RL pour le node mapping (tous les VNFs)
+              - edge mapping classique (super().edegemapping)
+              - reward calculé via getReward(vnr, sn_c)
         """
-        sn_c=dc(sn)
-        vnr_c=dc(vnr)
-        remapping_nodes=[]
-        for i in scaling_chaine:
-            if sn_c.snode[vnr_c.vnode[i].sn_host].lastcpu >vnr_c.vnode[i].req_cpu:
-                #vertical scalability
-                sn_c.snode[vnr_c.vnode[i].sn_host].lastcpu-=vnr_c.vnode[i].req_cpu
-                vnr_c.vnode[i].cpu+=vnr_c.vnode[i].req_cpu
+        from test_features import run_all
+
+        run_all(sn, vnr, Observation)
+        r2c = 0
+        p_load = 0
+        success = False
+        cause = None
+        num_vnfs = vnr.num_vnfs
+        ve2seindex = [-1] * vnr.num_vedges
+        vnr.nodemapping = [-1] * num_vnfs
+        sn_c = dc(sn)
+        sn_graph = SnDGLgraph(sn_c, vnr.vnode[0].cpu, device=device)
+        vnr_graph = DGLgraph(vnr, device=device)
+
+        obs = Observation(sn_graph, vnr_graph, 0, [])
+        transition = DQNTransition()
+        if self.saved_transition != None:
+            self.saved_transition.store_step(self.saved_observation, self.saved_action, self.saved_reward, True, obs)
+            self.agent.store_transition(self.saved_transition)
+            self.agent.learn()
+
+        for idx in range(num_vnfs):
+            nsuccess, action, v2sindex_c = self.nodemapping(obs, sn_c, vnr, idx)
+
+            if nsuccess:
+                if idx > 0:
+                    asnode = dc(sn_c.snode)
+                    asedge = dc(sn_c.sedege)
+
+                    # vsuccess, vese2index = super().edegemapping(asnode, asedge, vnr, vnr.nodemapping)
+                    nodes_mapped = [i for i in range(idx + 1)]
+                    vsuccess = self.edegemapping(sn_c, vnr, idx, nodes_mapped, ve2seindex)
+                    if vsuccess:
+                        if idx == num_vnfs - 1:
+
+                            success = True
+                            r2c, p_load, reliability, self.saved_reward = self.getReward(vnr, sn_c)
+                            # reliability = self.calculate_reliability(vnr, sn)
+                            print('rel:', reliability)
+                            self.saved_observation = dc(obs)
+                            self.saved_action = action
+                            self.saved_done = True
+                            self.saved_transition = transition
+
+                            vnr.edgemapping = ve2seindex
+
+                        else:
+                            reward = 0
+                            sn_graph = SnDGLgraph(sn_c, vnr.vnode[idx + 1].cpu, device=device)
+                            vnr_graph = DGLgraph(vnr, device=device)
+                            new_obs = Observation(sn_graph, vnr_graph, idx + 1, vnr.nodemapping[:idx + 1])
+                            transition.store_step(obs, action, reward, False, new_obs)
+                            obs = new_obs
+                    else:
+
+                        cause = 'edge'
+                        self.saved_reward = self.rejection_penalty
+                        self.saved_observation = dc(obs)
+                        self.saved_action = action
+                        self.saved_done = False
+                        self.saved_transition = transition
+                        success = False
+                        break
+
+
+                else:
+                    reward = 0
+                    sn_graph = SnDGLgraph(sn_c, vnr.vnode[idx + 1].cpu, device=device)
+                    vnr_graph = DGLgraph(vnr, device=device)
+                    new_obs = Observation(sn_graph, vnr_graph, idx + 1, vnr.nodemapping[:idx + 1])
+                    transition.store_step(obs, action, reward, False, new_obs)
+                    obs = new_obs
+
             else:
-                remapping_nodes.append(i)     
-        if len(remapping_nodes)>0:
-            return {"success":False, "sn":sn,"vnr":vnr}
+                self.saved_reward = self.rejection_penalty
+                self.saved_observation = dc(obs)
+                self.saved_action = action
+                self.saved_done = False
+                self.saved_transition = transition
+                success = False
+                cause = 'node'
+                break
+
+        if success:
+
+            results = {'success': success, 'nodemapping': vnr.nodemapping, 'edgemapping': vnr.edgemapping,
+                       'nb_vnfs': vnr.num_vnfs, "nb_vls": vnr.num_vedges, 'R2C': r2c, 'p_load': p_load,
+                       'reward': self.saved_reward, 'reliability': reliability,'sn': sn_c, 'cause': None, 'nb_iter': 0}
+            # print('results :', results)
+            return results
         else:
-           
-            return {"success":True, "sn":sn_c,"vnr":vnr_c}
+            results = {'success': success, 'nodemapping': [], 'edgemapping': [], 'nb_vnfs': 0, "nb_vls": 0, 'R2C': 0,
+                       'p_load': 0, 'reward': self.rejection_penalty, 'reliability':0, 'sn': sn, 'cause': cause, 'nb_iter': 0}
+            return results
+
+
+    def scaling_down(self, vnr, sn, scaling_chaine):
+        for i in scaling_chaine:
+            vnr.vnode[i].cpu -= vnr.vnode[i].req_cpu
+            sn.snode[vnr.vnode[i].sn_host].lastcpu += vnr.vnode[i].req_cpu
+        return sn
+
+    def scaling_up(self, vnr, sn, scaling_chaine):
+        sn_c = dc(sn)
+        vnr_c = dc(vnr)
+        remapping_nodes = []
+        for i in scaling_chaine:
+            if sn_c.snode[vnr_c.vnode[i].sn_host].lastcpu > vnr_c.vnode[i].req_cpu:
+                sn_c.snode[vnr_c.vnode[i].sn_host].lastcpu -= vnr_c.vnode[i].req_cpu
+                vnr_c.vnode[i].cpu += vnr_c.vnode[i].req_cpu
+            else:
+                remapping_nodes.append(i)
+        if len(remapping_nodes) > 0:
+            return {"success": False, "sn": sn, "vnr": vnr}
+        else:
+            return {"success": True, "sn": sn_c, "vnr": vnr_c}
 
 
 class GNNDRL(Solver):
     
-    def __init__(self,sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec ):
+    def __init__(self,sigma,gamma,rejection_penalty,  learning_rate, epsilon,
+                 memory_size, batch_size, num_inputs_sn, num_inputs_vnr,
+                 hidden_size, GCN_out, num_actions,max_iteration,eps_min , eps_dec ):
         super().__init__(sigma,rejection_penalty)
 
         self.agent=Agent(gamma, learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,eps_min, eps_dec )
@@ -525,7 +532,7 @@ class GNNDRL(Solver):
         and a boolean indicating if all VNFs have been placed. We use this variable to save a transition of the last placement.  """
         self.itteration = True
         """ A boolean indicating whether this solver has more than one chance to attempt finding a placement. """
-        self.max_itteration = max_itteration
+        self.max_iteration = max_iteration
         """  The maximum number of iterations allowed to find a feasible placement. """
 
     def mapping(self, sn, vnr):
@@ -595,7 +602,7 @@ class GNNDRL(Solver):
                             if idx == num_vnfs-1:
 
                                 success= True
-                                r2c,p_load,reward=self.getReward(vnr, sn_c)
+                                r2c,p_load,rel,reward = self.getReward(vnr, sn_c)
                                 transition.store_step(obs,action,reward, True)
                                 self.saved_transition = transition
                                 vnr.edgemapping=ve2seindex
@@ -840,9 +847,11 @@ class FirstFit(Solver):
                     vnr.vedege[i].spc = pathindex
                 vnr.nodemapping=v2sindex
                 vnr.edgemapping=vese2index
-                r2c=self.rev2cost(vnr)
-                r2c,p_load,metric=self.getReward(vnr, sb)
-                results={'success':success,'nodemapping':vnr.nodemapping,'edgemapping':vnr.edgemapping,'nb_vnfs':vnr.num_vnfs,"nb_vls":vnr.num_vedges,'R2C':r2c,'p_load':p_load,'reward':metric,'sn':sb,'cause':None,'nb_iter':None}
+                # r2c=self.rev2cost(vnr)
+                # r2c, p_load, reliability, self.saved_reward = self.getReward(vnr, sn_c)
+                r2c, p_load, reliability, reward = self.getReward(vnr, sb)
+                results={'success':success,'nodemapping':vnr.nodemapping,'edgemapping':vnr.edgemapping,'nb_vnfs':vnr.num_vnfs,"nb_vls":vnr.num_vedges,
+                         'R2C':r2c,'p_load':p_load,'reward':reward,'reliability': reliability,'sn':sb,'cause':None,'nb_iter':None}
                 return results
 
         else:
@@ -851,7 +860,8 @@ class FirstFit(Solver):
                 cause = "node"
             else : 
                 cause = 'edge'
-            results={'success':success,'nodemapping':[],'edgemapping':[],'nb_vnfs':0,"nb_vls":0,'R2C':0,'p_load':0,'reward':self.rejection_penalty,'sn':sb,'cause':cause,'nb_iter':None}    
+            results={'success':success,'nodemapping':[],'edgemapping':[],'nb_vnfs':0,"nb_vls":0,'R2C':0,'p_load':0,'reward':self.rejection_penalty,
+                     'reliability': 0,'sn':sb,'cause':cause,'nb_iter':None}
             return results
         
 
@@ -920,13 +930,15 @@ class FirstFit(Solver):
 
 class GNNDRL2(Solver):
     """ Identical to GNNDRL, but used in a scenario where scalability measures are disabled"""
-    def __init__(self,sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec ):
+    def __init__(self,sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size,
+                 batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out,
+                 num_actions,max_iteration,eps_min , eps_dec ):
         super().__init__(sigma,rejection_penalty)
 
         self.agent=Agent(gamma, learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,eps_min, eps_dec )
         self.saved_transition = None
         self.itteration = True
-        self.max_itteration = max_itteration
+        self.max_iteration = max_iteration
         
     def mapping(self, sn, vnr):
             r2c=0
@@ -1075,36 +1087,44 @@ class GNNDRL2(Solver):
             return {"success":True, "sn":sn_c,"vnr":vnr_c}
 
 
-    
-
 class GlobalSolver():
-    """
-    This class is used to manage all the solvers created in the system, facilitating placement and scaling operations.
-    """
+    def __init__(self, solvers):
+        self.solvers = solvers
 
-    def __init__(self,solvers):
+    def mapping(self, states):
         """
-        Initialize the GlobalSolver with a list of solvers.
-        
-        :param solvers: List of individual solvers that will attempt to map VNRs.
+        Version robuste : traite chaque état (VNR) avec le solveur approprié
+        sans dépasser les limites des listes.
         """
-        self.solvers=solvers
+        results = []
 
-    def mapping(self,states):
-        """
-        Attempt to map VNRs to the substrate network using the available solvers.
-        
-        :param states: A list of dictionaries containing the 'sn' (substrate network) and 'vnr' (VNR) for each solver.
-        :return: A list of results from each solver, containing success status and other metrics.
-        """
-        results= []
-        for i in range(len(self.solvers)):
-            results.append(self.solvers[i].mapping(states[i]['sn'],states[i]['vnr']))
-            itteration = 1
-            while not results[i]["success"] and self.solvers[i].itteration and itteration < self.solvers[i].max_itteration:
-                results[i] = self.solvers[i].mapping(states[i]['sn'],states[i]['vnr'])
-                itteration+=1
-            results[i]['nb_iter']= itteration
+        # On boucle sur les REQUÊTES (states) reçues
+        for i in range(len(states)):
+            # --- PROTECTION INDEX ---
+            # Si on a moins de solveurs que de requêtes, on réutilise le dernier
+            # ou le premier solveur disponible (cas fréquent en RL)
+            solver_index = i if i < len(self.solvers) else 0
+            current_solver = self.solvers[solver_index]
+
+            # Appel du mapping initial
+            results_i = current_solver.mapping(states[i]['sn'], states[i]['vnr'])
+            results.append(results_i)
+
+            # --- LOGIQUE D'ITÉRATION (GRASP / Heuristiques) ---
+            # On utilise results[-1] pour pointer sur le dernier résultat ajouté
+            iteration = 1
+            max_iter = getattr(current_solver, "max_iteration", 1)
+
+            # Tant que l'échec persiste et qu'on a un budget d'itérations
+            while (not results[-1]["success"]
+                   and iteration < max_iter):
+                # Relance le mapping (utile pour les algos stochastiques comme GRASP)
+                results[-1] = current_solver.mapping(states[i]['sn'], states[i]['vnr'])
+                iteration += 1
+
+            # Enregistre le nombre d'essais effectués
+            results[-1]['nb_iter'] = iteration
+
         return results
 
     def scaling_down(self,i,vnr,sn,scaling_chaine):

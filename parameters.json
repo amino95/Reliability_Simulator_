@@ -3,9 +3,9 @@
      "OUTPUT_PATH": "Results/",
      
      "SIM_TIME": [
-          6000
+          1000
      ],
-     "start_mean_calculation": 1000,
+     "start_mean_calculation": 200,
      "REPEAT_EXPERIENCE": 5,
      "MTBA": [
           2
@@ -68,83 +68,26 @@
      ],
      "vrel_range": [
           0.85,
-          0.99
+          0.90
      ],
      "vlt_range": [
           16,
           25
      ],
-     "episode_duration":1000,
-     "episode_per_file":5,
-     "solvers":[
-          {
-               "name":"sigma_0.5",
-               "type":"GNNDRL",
-               "sigma":0.5,
-               "gamma":0.99,
-               "rejection_penalty":-1, 
-               "learning_rate":1e-3, 
-               "epsilon":1, 
-               "memory_size":1000000,
-               "batch_size": 32, 
-               "num_inputs_sn":8, 
-               "num_inputs_vnr":7, 
-               "hidden_size": 64, 
-               "GCN_out": 32,
-               "num_actions":24,
-               "max_itteration":32,
-               "eps_min":0.01, 
-               "eps_dec": 2.5e-5
-          },
-          {
-               "name":"sigma_0.8",
-               "type":"GNNDRL",
-               "sigma":0.8,
-               "gamma":0.99,
-               "rejection_penalty":-1, 
-               "learning_rate":1e-3, 
-               "epsilon":1, 
-               "memory_size":1000000,
-               "batch_size": 32, 
-               "num_inputs_sn":8, 
-               "num_inputs_vnr":7, 
-               "hidden_size": 64, 
-               "GCN_out": 32,
-               "num_actions":24,
-               "max_itteration":32,
-               "eps_min":0.01, 
-               "eps_dec": 2.5e-5
-          },
-          {
-               "name":"sigma_0.2",
-               "type":"GNNDRL",
-               "sigma":0.2,
-               "gamma":0.99,
-               "rejection_penalty":-1, 
-               "learning_rate":1e-3, 
-               "epsilon":1, 
-               "memory_size":1000000,
-               "batch_size": 32, 
-               "num_inputs_sn":8, 
-               "num_inputs_vnr":7, 
-               "hidden_size": 64, 
-               "GCN_out": 32,
-               "num_actions":24,
-               "max_itteration":32,
-               "eps_min":0.01, 
-               "eps_dec": 2.5e-5
-          },
-          {
+      "Random": [
+           {
                "name":"Random",
                "type":"Random",
                "sigma":0.5,
                "rejection_penalty":-1
-          },
+          }
+           ],
+     "Grasp":[
           {
                "name":"Grasp_1.0",
                "type":"Grasp",
                "lambda":1.0,
-               "nIterations":1, 
+               "nIterations":1,
                "nIndividuals":3,
                "sigma":0.5,
                "rejection_penalty":-1,
@@ -155,7 +98,7 @@
                "name":"Grasp_0.5",
                "type":"Grasp",
                "lambda":0.5,
-               "nIterations":1, 
+               "nIterations":1,
                "nIndividuals":3,
                "sigma":0.5,
                "rejection_penalty":-1,
@@ -166,18 +109,191 @@
                "name":"Grasp_0.2",
                "type":"Grasp",
                "lambda":0.2,
-               "nIterations":1, 
+               "nIterations":1,
                "nIndividuals":3,
                "sigma":0.5,
                "rejection_penalty":-1,
                "localSearch": true,
                "localSearchDepth": 3
+          }
+          ],
+     "GNNDQN":
+             {
+               "name": "GNNDQN",
+               "type": "GNNDQN",
+               "sigma": 0.5,
+               "rejection_penalty":-1,
+               "gamma": 0.99,
+               "learning_rate": 0.0005,
+               "epsilon": 1.0,
+               "eps_min": 0.05,
+               "eps_dec": 5.5e-5,
+               "memory_size": 50000,
+               "batch_size": 128,
+               "memory_init": 3000,
+               "tau": 0.01,
+               "hidden_size": 64,
+               "GCN_out": 4,
+               "num_inputs_sn":8,
+               "num_inputs_vnr":7,
+               "num_actions": 24,
+               "max_iteration":32,
+               "update_frequency": 10
           },
+     "DQN":
+          {
+               "name": "GNNDQN",
+               "type": "GNNDQN",
+               "gamma": 0.99,
+               "learning_rate": 0.0005,
+               "epsilon_start": 1.0,
+               "epsilon_min": 0.05,
+               "epsilon_decay": 5.5e-5,
+               "memory_size": 50000,
+               "batch_size": 128,
+               "memory_init": 3000,
+               "tau": 0.01,
+               "hidden_size": 128,
+               "GCN_out": 64,
+               "num_inputs_sn": 5,
+               "num_inputs_vnr": 5,
+               "num_actions": 24,
+               "update_frequency": 10
+          },
+     "GNNDRL":[
+          {
+               "name":"sigma_0.5",
+               "type":"GNNDRL",
+               "sigma":0.5,
+               "gamma":0.99,
+               "rejection_penalty":-1,
+               "learning_rate":1e-3,
+               "epsilon":1,
+               "memory_size":1000000,
+               "batch_size": 32,
+               "num_inputs_sn":8,
+               "num_inputs_vnr":7,
+               "hidden_size": 64,
+               "GCN_out": 32,
+               "num_actions":24,
+               "max_iteration":32,
+               "eps_min":0.01,
+               "eps_dec": 2.5e-5
+          },
+          {
+               "name":"sigma_0.8",
+               "type":"GNNDRL",
+               "sigma":0.8,
+               "gamma":0.99,
+               "rejection_penalty":-1,
+               "learning_rate":1e-3,
+               "epsilon":1,
+               "memory_size":1000000,
+               "batch_size": 32,
+               "num_inputs_sn":8,
+               "num_inputs_vnr":7,
+               "hidden_size": 64,
+               "GCN_out": 32,
+               "num_actions":24,
+               "max_iteration":32,
+               "eps_min":0.01,
+               "eps_dec": 2.5e-5
+          },
+          {
+               "name":"sigma_0.2",
+               "type":"GNNDRL",
+               "sigma":0.2,
+               "gamma":0.99,
+               "rejection_penalty":-1,
+               "learning_rate":1e-3,
+               "epsilon":1,
+               "memory_size":1000000,
+               "batch_size": 32,
+               "num_inputs_sn":8,
+               "num_inputs_vnr":7,
+               "hidden_size": 64,
+               "GCN_out": 32,
+               "num_actions":24,
+               "max_iteration":32,
+               "eps_min":0.01,
+               "eps_dec": 2.5e-5
+          }
+        ],
+
+     "FF":
           {
                "name":"Firstfit",
                "type":"FF",
                "sigma":0.5,
                "rejection_penalty":-1
+          },
+     "GNNDQN_GRASP":
+          {
+               "name": "GNNDQN_GRASP",
+               "type": "GNNDQN_GRASP",
+               "gamma": 0.95,
+               "learning_rate": 0.001,
+               "memory_size": 10000,
+               "batch_size": 64,
+               "epsilon": 1.0,
+               "eps_min": 0.01,
+               "eps_dec": 0.0005,
+               "target_update": 100,
+               "num_inputs_sn": 6,
+               "num_inputs_vnr": 3,
+               "hidden_size": 128,
+               "gcn_out": 64,
+               "max_iteration": 10,
+               "alpha": 0.15,
+               "sigma": 2.0,
+               "rejection_penalty": -100,
+               "max_iteration_global": 1000
+          },
+
+     "episode_duration":200,
+     "episode_per_file":5,
+     "solvers": [
+          {
+               "name": "GNNDQN_GRASP",
+               "type": "GNNDQN_GRASP",
+               "sigma": 2.0,
+               "rejection_penalty": -100,
+               "gamma": 0.95,
+               "learning_rate": 0.001,
+               "memory_size": 10000,
+               "batch_size": 64,
+               "epsilon": 1.0,
+               "eps_min": 0.01,
+               "eps_dec": 0.0005,
+               "num_inputs_sn": 9,
+               "num_inputs_vnr": 7,
+               "hidden_size": 128,
+               "GCN_out": 64,
+               "num_actions": 24,
+               "max_iteration_gp": 10,
+               "alpha": 0.15,
+               "max_iteration": 1000
+          },
+          {
+               "name": "GNNDQN_Optimized",
+               "type": "GNNDQN",
+               "sigma": 0.2,
+               "rejection_penalty": -0.5,
+               "gamma": 0.99,
+               "learning_rate": 0.0003,
+               "epsilon": 1.0,
+               "eps_min": 0.05,
+               "eps_dec": 5.0e-5,
+               "batch_size": 128,
+               "memory_size": 2000,
+               "tau": 0.01,
+               "hidden_size": 128,
+               "GCN_out": 64,
+               "num_inputs_sn": 9,
+               "num_inputs_vnr": 7,
+               "num_actions": 24,
+               "max_iteration": 32,
+               "update_frequency": 10
           }
      ]
 }

@@ -18,7 +18,8 @@ class Result_saver():
         """ A list containing the R2C ratio for each placement during a single episode. """
         self.reward =[]
         """ A list containing the Reward for each placement during a single episode. """
-
+        self.rel = []
+        """ A list containing the REL ratio for each placement during a single episode. """
 
         self.nb_requests = 0
         """ The total number of VNR requests that arrived during a single episode. """
@@ -75,24 +76,26 @@ class Result_saver():
         """
         Create folders to save results, ensuring no duplication of folder names to avoid errors or accidental overwriting of results.
         """
-        os.makedirs(self.result_location,exist_ok=False)
-        os.makedirs(self.sn_state_folder,exist_ok=False)
-        os.makedirs(self.vnr_state_folder,exist_ok=False)
+        os.makedirs(self.result_location,exist_ok=True)
+        os.makedirs(self.sn_state_folder,exist_ok=True)
+        os.makedirs(self.vnr_state_folder,exist_ok=True)
 
     def init_files(self):
         """  Initialize results file with headers"""
         f = open(self.results_file, 'w+')
-        f.write("episode,Reward,R2C,nb_requests,nb_accepted_requests,avr_iteration,nb_rejected_requests,node_rejection,link_rejection,nb_vnfs,nb_vls,avr_cpu_used,max_cpu_used,avr_bw_used,max_bw_used,avr_used_nodes,max_used_nodes,avr_used_links,max_used_links,nb_scaling_up,nb_scaling_down,nb_accepted_scaling,nb_rejected_scaling\n")
+        f.write("episode,Reward,R2C,REL,nb_requests,nb_accepted_requests,avr_iteration,nb_rejected_requests,node_rejection,link_rejection,nb_vnfs,"
+                "nb_vls,avr_cpu_used,max_cpu_used,avr_bw_used,max_bw_used,avr_used_nodes,max_used_nodes,avr_used_links,max_used_links,nb_scaling_up,"
+                "nb_scaling_down,nb_accepted_scaling,nb_rejected_scaling\n")
         f.close()
 
         f = open(self.placement_file,"w+")
         max_vnfs= ",".join(map(str, range(self.max_vnf)))
-        f.write("Episode,Reward,R2C,nb_iter"+","+max_vnfs+"\n")
+        f.write("Episode,Reward,R2C,REL,nb_iter"+","+max_vnfs+"\n")
         f.close()   
 
             
 
-    def mapping_result(self,success,reward,R2C,cause=None,nb_iter=None):
+    def mapping_result(self,success,reward,reliability,R2C,cause=None,nb_iter=None):
         """
         This function records the results of a VNR placement attempt, including whether the placement was successful, 
         the associated reward, the R2C value, the cause of rejection (if applicable), and the number 
@@ -108,6 +111,7 @@ class Result_saver():
         self.nb_requests+=1
         self.R2C.append(R2C)
         self.reward.append(reward)
+        self.rel.append(reliability)
         if success:
             self.nb_accepted_requests+=1
             if nb_iter:
@@ -169,16 +173,16 @@ class Result_saver():
         and resource usage, ensuring a clean slate for the next episode.
         """
         self.R2C= []
-        self.reward =[]
-        
+        self.reward = []
+        self.reliability = []
         self.nb_requests = 0
-        self.nb_accepted_requests =0
+        self.nb_accepted_requests = 0
         self.nb_iteration = []
-        self.nb_rejected_requests =0
+        self.nb_rejected_requests = 0
         self.rejection_cause = {'node': 0, 'edge': 0}
 
-        self.nb_vnfs =[]
-        self.nb_vls =[]
+        self.nb_vnfs = []
+        self.nb_vls = []
 
         self.used_ressources = {'used_nodes': [0], 'used_links': [0],'used_cpu':[0],'used_bw':[0]}
         
@@ -186,10 +190,10 @@ class Result_saver():
         self.nb_accepted_scaling =0
         self.nb_rejected_scaling =0
     
-    def save_placement(self,episode,reward,r2c,nb_iter,mapping):
+    def save_placement(self, episode, reward, r2c, reliability, nb_iter, mapping):
         f= open(self.placement_file,"a")
         result= ",".join(map(str, mapping))
-        f.write(str(episode)+","+str(reward)+","+str(r2c)+","+str(nb_iter)+","+result+"\n")
+        f.write(str(episode)+","+str(reward)+","+str(r2c)+","+str(reliability)+str(nb_iter)+","+result+"\n")
         f.close()
 
     def save_vnr_state(self,vnr):
@@ -206,7 +210,12 @@ class Result_saver():
 
     def save_results(self):
         f = open(self.results_file, 'a')
-        row = f"{self.episode_counter},{np.mean(self.reward)},{np.mean(self.R2C)},{self.nb_requests},{self.nb_accepted_requests},{np.mean(self.nb_iteration)},{self.nb_rejected_requests},{self.rejection_cause['node']},{self.rejection_cause['edge']},{np.sum(self.nb_vnfs)},{np.sum(self.nb_vls)},{np.mean(self.used_ressources['used_cpu'])},{np.max(self.used_ressources['used_cpu'])},{np.mean(self.used_ressources['used_bw'])},{np.max(self.used_ressources['used_bw'])},{np.mean(self.used_ressources['used_nodes'])},{np.max(self.used_ressources['used_nodes'])},{np.mean(self.used_ressources['used_links'])},{np.max(self.used_ressources['used_links'])},{self.nb_scaling_requests['up']},{self.nb_scaling_requests['down']},{self.nb_accepted_scaling},{self.nb_rejected_scaling}\n"
+        row = (f"{self.episode_counter},{np.mean(self.reward)},{np.mean(self.R2C)}, {np.mean(self.rel)},{self.nb_requests},{self.nb_accepted_requests},{np.mean(self.nb_iteration)},"
+               f"{self.nb_rejected_requests},{self.rejection_cause['node']},{self.rejection_cause['edge']},{np.sum(self.nb_vnfs)},{np.sum(self.nb_vls)},"
+               f"{np.mean(self.used_ressources['used_cpu'])},{np.max(self.used_ressources['used_cpu'])},{np.mean(self.used_ressources['used_bw'])},"
+               f"{np.max(self.used_ressources['used_bw'])},{np.mean(self.used_ressources['used_nodes'])},{np.max(self.used_ressources['used_nodes'])},"
+               f"{np.mean(self.used_ressources['used_links'])},{np.max(self.used_ressources['used_links'])},{self.nb_scaling_requests['up']},"
+               f"{self.nb_scaling_requests['down']},{self.nb_accepted_scaling},{self.nb_rejected_scaling}\n")
         f.write(row)
         f.close()
 
@@ -223,20 +232,20 @@ class Global_controller():
     This class is responsible for managing the results from multiple solvers 
     in the simulation. 
     """
-    def __init__(self,solvers,sns,env,episode_duration,results_location,episode_per_file,max_vnfs):
-        self.solvers= solvers
+    def __init__(self, solvers, sns, env, episode_duration, results_location, episode_per_file, max_vnfs):
+        self.solvers = solvers
         """ List of solvers names """
-        self.sns=sns
+        self.sns = sns
         """ List of Substrate Network"""
-        self.env=env
+        self.env = env
         """ Simpy env"""
-        self.episode_duration=episode_duration
-        self.results_location= results_location
+        self.episode_duration = episode_duration
+        self.results_location = results_location
         self.result_savers = []
         self.episode_per_file = episode_per_file
         shutil.rmtree(results_location)
         for i in range(len(self.solvers)):
-            self.result_savers.append(Result_saver(self.solvers[i],max_vnfs,self.results_location,self.episode_per_file))
+            self.result_savers.append(Result_saver(self.solvers[i], max_vnfs, self.results_location, self.episode_per_file))
         for i in range(len(self.solvers)):
                 self.result_savers[i].create_directories()
                 self.result_savers[i].init_files()
@@ -258,7 +267,7 @@ class Global_controller():
                 self.result_savers[i].update_episode()
                 self.result_savers[i].var_reset()
 
-    def mapping_result(self,results,sns):
+    def mapping_result(self, results, sns):
         """ 
         Updates the results for each solver based on the mapping results.
 
@@ -266,9 +275,16 @@ class Global_controller():
         corresponding solver. It updates various metrics, saves placement details,
         and records the state of the substrate network.
         """
+
+        # def mapping_result(self, success, reward, reliability, R2C, cause=None, nb_iter=None):
         for i in range(len(self.solvers)):
-            self.result_savers[i].mapping_result(results[i]['success'],results[i]['reward'],results[i]['R2C'],results[i]['cause'],results[i]['nb_iter'])
-            self.result_savers[i].save_placement(self.result_savers[i].episode_counter,results[i]['reward'],results[i]['R2C'],results[i]['nb_iter'],results[i]['nodemapping'])
+            self.result_savers[i].mapping_result(results[i]['success'], results[i]['reward'], results[i]['reliability'], results[i]['R2C'], results[i]['cause'],
+                                                 results[i]['nb_iter'])
+
+            # def save_placement(self, episode, reward, r2c, reliability, nb_iter, mapping):
+
+            self.result_savers[i].save_placement(self.result_savers[i].episode_counter, results[i]['reward'], results[i]['R2C'],
+                                                 results[i]['reliability'], results[i]['nb_iter'], results[i]['nodemapping'])
             self.result_savers[i].sn_state(sns[i])
             self.result_savers[i].update_used_ressources(sns[i])
             self.result_savers[i].nb_deployed_ressources(results[i]['nb_vnfs'],results[i]['nb_vls'])

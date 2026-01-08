@@ -9,13 +9,15 @@ import abc
 
 class Edege:
     
-    def __init__(self,index,bw,lt,a_t_b):
+    def __init__(self,index,bw,lt, rel,a_t_b):
         self.index=index  
         """ Edge index/ID """          
         self.bandwidth = bw
         """ The bandwidth capacity of the edge. """ 
         self.latency = lt
         """ The latency of the edge. Not used in this version """
+        self.rel = rel
+        """ The relibility value of the edge """
         self.nodeindex=[int(a_t_b[0]),int(a_t_b[1])]
         """ The indices of the two nodes connected by the edge, extracted from the a_t_b parameter. """
 
@@ -30,8 +32,8 @@ class Edege:
 
 class Vedege(Edege):
     
-    def __init__(self,index,bw,lt,a_t_b):
-        super().__init__(index, bw,lt, a_t_b)
+    def __init__(self,index,bw,lt,vrel, a_t_b):
+        super().__init__(index, bw,lt, vrel, a_t_b)
         self.spc = [] 
         """ 
         A list representing the path of physical edges (in the substrate network) that are used to map the virtual edge (in the VNR). 
@@ -39,13 +41,13 @@ class Vedege(Edege):
         """  
         
     def __str__(self):
-        return {'vedege':self.index,'bandwidth':self.bandwidth,'latency':self.latency,'nodeindex':self.nodeindex,'spc':self.spc}
+        return {'vedege':self.index,'bandwidth':self.bandwidth,'reliability':self.rel,'latency':self.latency,'nodeindex':self.nodeindex,'spc':self.spc}
     
 
 class Sedege(Edege):
     
-    def __init__(self,index,bw,lt,a_t_b):
-        super().__init__(index, bw, lt,a_t_b)
+    def __init__(self,index,bw,lt,rel, a_t_b):
+        super().__init__(index, bw, lt, rel,a_t_b)
         self.lastbandwidth = bw
         """ Tracks the available bandwidth after resource allocation to virtual edges. """
         self.vedegeindexs = []

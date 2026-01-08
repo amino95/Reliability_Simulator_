@@ -9,12 +9,14 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from sympy.codegen.ast import continue_
+
 from node import Snode
 from edege import Sedege
 
 class SN :
     
-    def __init__(self, num_nodes, cpu_range, bw_range,lt_range,topology):
+    def __init__(self, num_nodes, cpu_range, bw_range,lt_range, rel_range, topology):
 
         self.num_nodes = num_nodes
         """  Total number of nodes in the substrate network"""
@@ -22,9 +24,9 @@ class SN :
         """ List of Snodes, containing objects of type Snode, representing the actual nodes of the SN """
         self.sedege = []
         """ List of Edges, containing objects of type Sedege, representing the actual Edges of the SN """
-        self.g = topology 
+        self.graph = topology
         """ The SN topology"""
-        self.edges = list(self.g.edges())
+        self.edges = list(self.graph.edges())
         """ List of edges in the SN, containing source and destination nodes, used for managing topology """
         self.numedges = len(self.edges)
         """ Total number of Edges in the SN"""
@@ -33,7 +35,9 @@ class SN :
         #-------------------------------------------------------------#
         for i in range(self.num_nodes):
             cpu = np.random.randint(cpu_range[0],cpu_range[1])
-            self.snode.append(Snode(i,cpu))
+            rel = np.random.uniform(rel_range[0],rel_range[1])
+
+            self.snode.append(Snode(i,cpu,rel))
         #-------------------------------------------------------------#
 
         # Sedges Creation
@@ -41,8 +45,9 @@ class SN :
         for i in range(self.numedges):
             bw = np.random.randint(bw_range[0],bw_range[1])
             lt = np.random.randint(lt_range[0], lt_range[1])
+            rel= np.random.uniform(rel_range[0], rel_range[1])
             a_t_b = [self.edges[i][0], self.edges[i][1]]
-            self.sedege.append(Sedege(i, bw,lt, a_t_b))
+            self.sedege.append(Sedege(i, bw,lt, rel,a_t_b))
             self.snode[a_t_b[0]].links.append(i)
             self.snode[a_t_b[1]].links.append(i)
         #-------------------------------------------------------------#
@@ -55,11 +60,18 @@ class SN :
                     n.bw += e.bandwidth
             n.lastbw = n.bw
         #----------------------------------------------------------------# 
+        # Calculating the total bandwidth of connected edges for each Snode.
+        # ----------------------------------------------------------------#
+        for n in self.snode:
+            for e in self.sedege:
+                if n.index in e.nodeindex:
+                    n.rel *= e.rel
+        # ----------------------------------------------------------------#
 
         # Assigning neighbors to each Snode and Snode degree
         #----------------------------------------------------------------#
         for el in self.snode:
-            el.neighbors = [n for n in self.g.neighbors(el.index)]
+            el.neighbors = [n for n in self.graph.neighbors(el.index)]
         for el in self.snode:
             el.degree = len(el.neighbors)
         #----------------------------------------------------------------#
@@ -113,37 +125,46 @@ class SN :
         for node in self.snode:
             cpu.append(node.lastcpu)
         return cpu
-        
-    def removenodemapping(self, vnr):
-        """ 
-        Removes the node mapping of a VNR from the substrate network.
 
-        This method updates the substrate nodes by removing the VNFs that were 
-        previously mapped to them. It performs the following steps:
-        
-        1. Iterates over all substrate nodes (`self.snode`).
-        2. For each substrate node, it checks if any VNF from the given VNR is mapped to that node.
-        3. If a match is found, the substrate node's remaining CPU (`lastcpu`) is incremented by 
-        the CPU of the corresponding VNF.
-        4. The matching VNF is removed from the `vnodeindexs` list of the substrate node.
-        5. Finally, it clears the host mapping (`sn_host`) for each VNF in the VNR.
-        
-        Args:
-            vnr: The VNR whose node mappings should be removed.
-        """
+    def get_vnf_reliability(self, vnr_id, vnode_idx):
+        # vnf = vnr_id.vnode[vnr_id]
+        # print('vnr_id.vnode[vnode_idx]', vnr_id)
+        return vnr_id.vnode[vnode_idx].rel
+
+    def removenodemapping(self, vnr, VNRSS):
+
         sn = len(self.snode)
-        vn = len(vnr.vnode)
+
         for i in range(sn):
-            xtemp = []
-            for x in self.snode[i].vnodeindexs:
-                if vnr.id == x[0]:
-                    self.snode[i].lastcpu = self.snode[i].lastcpu + vnr.vnode[x[1]].cpu
-                    xtemp.append(x)
-            for x in xtemp:
-                self.snode[i].vnodeindexs.remove(x)
-        for j in range(vn):
-            vnr.vnode[j].sn_host = None
-            
+
+            had_mapping = False
+            new_vnodeindexs = []
+
+            for (mapped_vnr_id, vnode_idx) in self.snode[i].vnodeindexs:
+
+                if mapped_vnr_id == vnr.id:
+                    had_mapping = True
+                    # free CPU
+                    self.snode[i].lastcpu += vnr.vnode[vnode_idx].cpu
+                else:
+                    new_vnodeindexs.append((mapped_vnr_id, vnode_idx))
+
+            self.snode[i].vnodeindexs = new_vnodeindexs
+
+            # ⛔ If this VNR had no mapping on this node → skip reliability
+            if not had_mapping:
+                continue
+
+            # Recompute reliability
+            new_rel = 1.0
+            for (other_vnr_id, other_vnode_idx) in self.snode[i].vnodeindexs:
+                idx = VNRSS.reqs_ids.index(other_vnr_id)
+                other_vnr = VNRSS.reqs[idx]
+                other_vnf = other_vnr.vnode[other_vnode_idx]
+                new_rel *= other_vnf.rel
+
+            self.snode[i].rel = new_rel
+
     def removeedegemapping(self, vnr):
         """ 
         Removes the edge mapping of a VNR from the substrate network.
@@ -193,7 +214,7 @@ class SN :
         en = len(self.sedege)
         for i in range(en):
             if self.sedege[i].lastbandwidth > bandlimit:
-                g.add_edge(self.sedege[i].nodeindex[0], self.sedege[i].nodeindex[1], index=self.sedege[i].index,lastbandwidth=self.sedege[i].lastbandwidth, bandwidth=self.sedege[i].bandwidth,capacity=1)
+                g.add_edge(self.sedege[i].nodeindex[0], self.sedege[i].nodeindex[1], index=self.sedege[i].index,lastbandwidth=self.sedege[i].lastbandwidth, bandwidth=self.sedege[i].bandwidth, reliability=self.sedege[i].reliability, capacity=1)
         return g
     
     def drawSN(self,edege_label=False,classflag=False):
@@ -238,70 +259,88 @@ class SN :
         for i in range(n):
             print('--------------------')
             self.sedege[i].msg()
-            
-            
-    
-    def getFeatures(self,vnf_cpu):
+
+    def getFeatures(self, vnf_cpu):
         """
-        Extract features for the substrate network
-        
-        This function generates various features from the substrate nodes (snode) such as CPU, bandwidth, 
-        degree, and p_load, scaled and formatted for input into a machine learning model. It also 
-        computes a feasible flag for each node, indicating whether it can host the given VNF based 
-        on available CPU.
-        
-        Args:
-            vnf_cpu (int): CPU requirement of the VNF being considered for mapping.
-            
-        Returns:
-            features (np.ndarray): A matrix of substrate network features, where each row corresponds 
-                                to a node and its associated features. 
-                                The features are concatenated, transposed, and returned as a NumPy array for further processing.
+        Extract substrate features, including reliability.
         """
-        
-        cpu = [el.lastcpu for el in self.snode]
-        cmax = np.max(cpu)
-        scaled_cpu = cpu  / cmax
-        cpu = torch.from_numpy(np.squeeze(scaled_cpu))
-        cpu = torch.unsqueeze(cpu, dim=0).numpy()
-        
-        bw = [el.lastbw  for el in self.snode]
-        bmax = np.max(bw)
-        scaled_bw = bw / bmax
-        bw = torch.from_numpy(np.squeeze(scaled_bw))
-        bw = torch.unsqueeze(bw, dim=0).numpy()
-        
-        bw_av = [el.bw / el.degree for el in self.snode]
-        maxb = np.max(bw_av)
-        scaled_bw_av = bw_av/maxb
-        bw_av = torch.from_numpy(np.squeeze(scaled_bw_av))
-        bw_av = torch.unsqueeze(bw_av, dim=0).numpy()
 
-        bw_max = [el.max_bw(self.sedege) for el in self.snode]
-        scaled_max = bw_max/np.max(bw_max)
-        bw_max = torch.from_numpy(np.squeeze(scaled_max))
-        bw_max = torch.unsqueeze(bw_max, dim=0).numpy()
+        # --------------------
+        # CPU (normalized)
+        # --------------------
+        cpu = np.array([el.lastcpu for el in self.snode])
+        cpu = cpu / (cpu.max() if cpu.max() > 0 else 1)
+        cpu = cpu.reshape(1, -1)
 
-        bw_min = [el.min_bw(self.sedege) for el in self.snode]
-        scaled_min = bw_min/np.max(bw_min)
-        bw_min = torch.from_numpy(np.squeeze(scaled_min))
-        bw_min = torch.unsqueeze(bw_min, dim=0).numpy()
+        # --------------------
+        # Bandwidth (normalized)
+        # --------------------
+        bw = np.array([el.lastbw for el in self.snode])
+        bw = bw / (bw.max() if bw.max() > 0 else 1)
+        bw = bw.reshape(1, -1)
 
-        degree = [el.degree for el in self.snode]
-        scaled_degree = degree/np.max(degree)
-        degree = torch.from_numpy(np.squeeze(scaled_degree))
-        degree = torch.unsqueeze(degree, dim=0).numpy()
+        # --------------------
+        # Reliability (normalized)
+        # --------------------
+        rel = np.array([el.rel for el in self.snode])
+        rel = rel / (rel.max() if rel.max() > 0 else 1)
+        rel = rel.reshape(1, -1)
 
-        feasible_flag = [1 if el.lastcpu > vnf_cpu else 0 for el in self.snode]
-        feasible_flag = torch.from_numpy(np.squeeze(feasible_flag))
-        feasible_flag = torch.unsqueeze(feasible_flag, dim=0).numpy()
+        # --------------------
+        # Avg BW / degree
+        # --------------------
+        bw_av = np.array([el.bw / el.degree for el in self.snode])
+        bw_av = bw_av / (bw_av.max() if bw_av.max() > 0 else 1)
+        bw_av = bw_av.reshape(1, -1)
 
-        p_load = torch.from_numpy(np.squeeze([el.p_load for el in self.snode]))
-        p_load = torch.unsqueeze(p_load, dim=0).numpy()
+        # --------------------
+        # Max / Min BW
+        # --------------------
+        bw_max = np.array([el.max_bw(self.sedege) for el in self.snode])
+        bw_max = bw_max / (bw_max.max() if bw_max.max() > 0 else 1)
+        bw_max = bw_max.reshape(1, -1)
 
-        features = np.transpose(np.concatenate((feasible_flag ,cpu,bw, bw_av, bw_max, bw_min, degree,p_load)))
+        bw_min = np.array([el.min_bw(self.sedege) for el in self.snode])
+        bw_min = bw_min / (bw_min.max() if bw_min.max() > 0 else 1)
+        bw_min = bw_min.reshape(1, -1)
+
+        # --------------------
+        # Degree
+        # --------------------
+        degree = np.array([el.degree for el in self.snode])
+        degree = degree / (degree.max() if degree.max() > 0 else 1)
+        degree = degree.reshape(1, -1)
+
+        # --------------------
+        # Feasible flag (1 if node can host VNF)
+        # --------------------
+        feasible_flag = np.array([1 if el.lastcpu >= vnf_cpu else 0 for el in self.snode])
+        feasible_flag = feasible_flag.reshape(1, -1)
+
+        # --------------------
+        # p_load
+        # --------------------
+        p_load = np.array([el.p_load for el in self.snode])
+        p_load = p_load.reshape(1, -1)
+
+        # --------------------
+        # FINAL FEATURES
+        # order is important !
+        # --------------------
+        features = np.concatenate((
+            feasible_flag,
+            cpu,
+            bw,
+            rel,  # ⭐ reliability here
+            bw_av,
+            bw_max,
+            bw_min,
+            degree,
+            p_load
+        ), axis=0).T
+
         return features
-        
+
     def getFeatures2(self,vnf_cpu):
         """
         Extract features for the substrate network without  (p_load) information.
@@ -327,6 +366,12 @@ class SN :
         scaled_bw = bw / bmax
         bw = torch.from_numpy(np.squeeze(scaled_bw))
         bw = torch.unsqueeze(bw, dim=0).numpy()
+
+        rel = [el.rel for el in self.snode]
+        max_rel = np.max(rel)
+        scaled_rel = rel / max_rel
+        rel = torch.from_numpy(np.squeeze(scaled_rel))
+        rel = torch.unsqueeze(rel, dim=0).numpy()
         
         bw_av = [el.bw / el.degree for el in self.snode]
         maxb = np.max(bw_av)
@@ -353,7 +398,7 @@ class SN :
         feasible_flag = torch.from_numpy(np.squeeze(feasible_flag))
         feasible_flag = torch.unsqueeze(feasible_flag, dim=0).numpy()
 
-        features = np.transpose(np.concatenate((feasible_flag ,cpu,bw, bw_av, bw_max, bw_min, degree)))
+        features = np.transpose(np.concatenate((feasible_flag , cpu,bw, rel, bw_av, bw_max, bw_min, degree)))
         return features
     
 

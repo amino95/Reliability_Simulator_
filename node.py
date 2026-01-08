@@ -19,6 +19,7 @@ class Node:
         """ Node's CPU capacity """
         self.bw = 0
         """ The bandwidth for the node (initially set to 0) will be updated as the sum of the bandwidth of all links connected to this node """
+
         self.neighbors = []
         """ List of neighboring nodes """
         self.links =[]
@@ -48,6 +49,8 @@ class Vnf(Node):
         self.cpu_index = 0
         """ The current index in the flavor range representing the CPU capacity demanded by the VNF """
         i=1
+        """ The reliability will be set equal to 1 then it will be the product of the rel value of all the links connected to it """
+        self.rel = 1
         
         # Flavor Creation 
         #---------------------------------------------------------#
@@ -92,6 +95,8 @@ class Vnf(Node):
         This is calculated by checking the bandwidth of each edge in the 'edges' list that 
         connects to this node.
         """
+        if not self.links:
+            return 0
         bw =[edges[i].bandwidth for i in self.links]
         return np.max(bw)
     
@@ -101,16 +106,15 @@ class Vnf(Node):
         This is calculated by checking the bandwidth of each edge in the 'edges' list that 
         connects to this node's links.
         """
+        if not self.links:
+            return 0
         bw =[edges[i].bandwidth for i in self.links]
         return np.min(bw)
-    
-
-
 
         
     def __str__(self):
        """ Returns a dictionary containing key attributes of the VNF """
-       return {'vnf':str(self.index),'cpu':str(self.cpu),'cpu index':str(self.cpu_index),'flavor':self.flavor,'max_cpu':str(self.p_maxCpu),'bw':str(self.bw),'neighbors':str(self.neighbors),'placement':str(self.sn_host)}
+       return {'vnf':str(self.index),'cpu':str(self.cpu),'cpu index':str(self.cpu_index),'flavor':self.flavor,'max_cpu':str(self.p_maxCpu),'bw':str(self.bw),'rel':str(self.rel),'neighbors':str(self.neighbors),'placement':str(self.sn_host)}
     
     def dm_scaling(self,scale_up):
         """
@@ -134,7 +138,7 @@ class Vnf(Node):
         
 class Snode(Node):
     
-    def __init__(self,index,cpu):
+    def __init__(self,index,cpu,rel):
 
         super().__init__(index, cpu)
         self.lastcpu=cpu
@@ -145,19 +149,24 @@ class Snode(Node):
         """ A list of VNFs hosted on this node, where each entry contains the VNR ID and the corresponding VNF ID in the format [vnr.id,vnf.index]"""
         self.p_load=0
         """ The node's potential load, representing the total potential load from all VNFs hosted on this node. It is calculated as the sum of the maximum potential CPU of each hosted VNF, divided by the node's maximum CPU capacity. """
-        
+        self.rel = rel
+        """ The reliability for the node (initially set to 1) will be updated as the product of the reliability of all links connected to this node """
 
     def __str__(self):
         """ Returns a dictionary containing key attributes of the Snode """
-        return {'snode' :str(self.index), 'cpu': str(self.cpu), 'lastcpu': str(self.lastcpu),'vnodeindexs':self.vnodeindexs,'neighbors': self.neighbors,'bw':str(self.bw),'lastbw':str(self.lastbw),'p_load':str(self.p_load)}
+        return {'snode' :str(self.index), 'cpu': str(self.cpu), 'lastcpu': str(self.lastcpu),'vnodeindexs':self.vnodeindexs,'neighbors': self.neighbors,'bw':str(self.bw),'rel':str(self.rel),'lastbw':str(self.lastbw),'p_load':str(self.p_load)}
 
     def max_bw(self,edges):
         """Returns the maximum remaining bandwidth from all the links connected to this node."""
+        if not self.links:
+            return 0
         bw =[edges[i].lastbandwidth for i in self.links]
         return np.max(bw)
         
     def min_bw(self,edges):
         """Returns the minimum remaining bandwidth from all the links connected to this node."""
+        if not self.links:
+            return 0
         bw =[edges[i].lastbandwidth for i in self.links]
         return np.min(bw)
 

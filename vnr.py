@@ -28,7 +28,7 @@ def generate_connected_er_graph(num_nodes, probability):
 class VNR:
     ID_ = 0 
     """ A class variable used to assign a unique identifier to each VNR instance.  """
-    def __init__(self,vnf_range, cpu_range, bw_range,lt_range,flavor_size,duration,mtbs):
+    def __init__(self,vnf_range, cpu_range, bw_range,lt_range,rel_range,flavor_size,duration,mtbs):
         VNR.ID_+=1 
         self.mtbs=mtbs             
         """ Mean time between scale demands that arrive during the VNF lifespan """           
@@ -71,7 +71,8 @@ class VNR:
             a_t_b = list(self.graph.edges())[i]
             bw = np.random.randint(bw_range[0],bw_range[1])
             lt = np.random.randint(lt_range[0],lt_range[1])
-            ved = Vedege(i,bw,lt,a_t_b)
+            rel=np.random.uniform(rel_range[0], rel_range[1])
+            ved = Vedege(i,bw,rel,lt,a_t_b)
             self.vedege.append(ved)
             self.vnode[a_t_b[0]].links.append(i)
             self.vnode[a_t_b[1]].links.append(i)
@@ -192,41 +193,49 @@ class VNR:
             if self.vnode[j].cpu_index> 0:
                 self.vnode[j].cpu_index-=1
                 self.vnode[j].req_cpu=self.vnode[j].cpu-self.vnode[j].flavor[self.vnode[j].cpu_index]
-    
-    
-    def p_loadRset(self,sb):
-        """Remove p_load of the VNFS of this VNR from Substrate network, To be utilized when ending a VNR"""
-        for j in range(self.num_vnfs):
-            i=self.nodemapping[j]
-            if (i>-1):
-                sb.snode[i].p_load=(sb.snode[i].p_load*sb.snode[i].cpu-self.vnode[j].p_maxCpu)/sb.snode[i].cpu
-                if sb.snode[i].p_load<0:
-                    sb.snode[i].p_load=0.0
-            
-    def EndsVnr(self,sb,VNRSS):
-        """ 
-        Updates substrate resources after freeing the allocated resources for a VNR.
-        This method will be called when the VNR's lifespan ends or when a scalability failure occurs.
-        
-        It performs the following actions:
-        1. Gets the index of the VNR in the VNRSS
-        2. Removes the p_load of the VNFs of this VNR from the substrate network.
-        3. Removes the VNF mapping and edge mapping from the substrate.
-        4. Removes the VNR from the VNRSS by updating the corresponding lists and decrementing the number of requests.
-        5. Deletes the current instance of the VNR.
-        """
-        VNRindex=VNRSS.reqs_ids.index(self.id) 
-        self.p_loadRset(sb)  
-        sb.removenodemapping(VNRSS.reqs[VNRindex])  
+
+    def p_loadRset(self, sb):
+        """Supprime le p_load des VNFs de cette VNR du réseau substrat"""
+        # Cas où nodemapping est un dictionnaire
+        if isinstance(self.nodemapping, dict):
+            targets = self.nodemapping.items()  # [(vnf_idx, sn_node_id), ...]
+        # Cas où nodemapping est une liste (ex: [node_id, node_id, ...])
+        elif isinstance(self.nodemapping, list):
+            targets = enumerate(self.nodemapping)  # [(0, node_id), (1, node_id), ...]
+        else:
+            return
+
+        for vnf_idx, sn_node_id in targets:
+            if sn_node_id is not None and sn_node_id > -1:
+                s_node = sb.snode[sn_node_id]
+                v_node = self.vnode[vnf_idx]
+
+                # Formule inverse du p_load
+                s_node.p_load = (s_node.p_load * s_node.cpu - v_node.p_maxCpu) / s_node.cpu
+
+                if s_node.p_load < 0.000001:
+                    s_node.p_load = 0.0
+
+
+    def EndsVnr(self, sb, VNRSS):
+
+        VNRindex = VNRSS.reqs_ids.index(self.id)
+
+        self.p_loadRset(sb)
+
+        # FIXED: pass VNRSS
+        sb.removenodemapping(VNRSS.reqs[VNRindex], VNRSS)
         sb.removeedegemapping(VNRSS.reqs[VNRindex])
-        VNRSS.reqs_ids.remove(VNRSS.reqs_ids[VNRindex])
-        VNRSS.reqs.remove(VNRSS.reqs[VNRindex])
-        VNRSS.vedges.remove(VNRSS.vedges[VNRindex])
-        VNRSS.vnfs.remove(VNRSS.vnfs[VNRindex])
-        VNRSS.num_reqs-=1
+
+        VNRSS.reqs_ids.pop(VNRindex)
+        VNRSS.reqs.pop(VNRindex)
+        VNRSS.vedges.pop(VNRindex)
+        VNRSS.vnfs.pop(VNRindex)
+
+        VNRSS.num_reqs -= 1
+
         del self
-        return
-    
+
     # Remove the VNR from VNRSS, to be used when a VNR placement failure occurs.
     def DropVnr(self,VNRSS):
         """ 
@@ -260,64 +269,53 @@ class VNR:
         return self.graph 
     
     # Extracting features to feed into the feature extraction architecture
+
     def getFeatures(self):
-        """ 
-        Extracts and scales various features from the VNR's VNFs for use in a feature extraction architecture.
-        
-        This method computes the following features for each VNF:
-        1. CPU utilization, scaled by the maximum CPU across all VNFs.
-        2. Bandwidth, scaled by the maximum bandwidth across all VNFs.
-        3. Average bandwidth per degree, scaled by the maximum average bandwidth.
-        4. Maximum bandwidth, scaled by the maximum bandwidth among all VNFs.
-        5. Minimum bandwidth, scaled by the minimum bandwidth across all VNFs.
-        6. Degree of each VNF, scaled by the maximum degree across all VNFs.
-        7. Potentiel Maximum CPU capacity of each VNF, scaled by the maximum capacity across all VNFs.
-        
-        The features are concatenated, transposed, and returned as a NumPy array for further processing.
         """
-        cpu = [el.cpu for el in self.vnode]
-        cmqx = np.max(cpu)
-        scaled_cpu = cpu /cmqx
-        cpu = torch.from_numpy(np.squeeze(scaled_cpu))
-        cpu = torch.unsqueeze(cpu, dim=0).numpy()
-        
-        
-        bw = [el.bw for el in self.vnode]
-        bmax = np.max(bw)
-        scaled_bw = bw  / bmax
-        bw = torch.from_numpy(np.squeeze(scaled_bw))
-        bw = torch.unsqueeze(bw, dim=0).numpy()
-        
-        bw_av = [el.bw / el.degree for el in self.vnode]
-        maxb = np.max(bw_av)
-        scaled_bw_av = bw_av/maxb
-        bw_av = torch.from_numpy(np.squeeze(scaled_bw_av))
-        bw_av = torch.unsqueeze(bw_av, dim=0).numpy()
+        Extracts scaled features for VNR nodes.
+        """
 
-        bw_max = [el.max_bw(self.vedege) for el in self.vnode]
-        scaled_max = bw_max/np.max(bw_max)
-        bw_max = torch.from_numpy(np.squeeze(scaled_max))
-        bw_max = torch.unsqueeze(bw_max, dim=0).numpy()
+        # Always convert to float32 BEFORE dividing
+        cpu = np.array([el.cpu for el in self.vnode], dtype=np.float32)
+        cpu /= cpu.max() if cpu.max() != 0 else 1
+        cpu = cpu.reshape(1, -1)
 
-        bw_min = [el.min_bw(self.vedege) for el in self.vnode]
-        scaled_min = bw_max/np.min(bw_min)
-        bw_min = torch.from_numpy(np.squeeze(scaled_min))
-        bw_min = torch.unsqueeze(bw_min, dim=0).numpy()
+        bw = np.array([el.bw for el in self.vnode], dtype=np.float32)
+        bw /= bw.max() if bw.max() != 0 else 1
+        bw = bw.reshape(1, -1)
 
-        degree = [el.degree for el in self.vnode]
-        scaled_degree = degree/np.max(degree)
-        degree = torch.from_numpy(np.squeeze(scaled_degree))
-        degree = torch.unsqueeze(degree, dim=0).numpy()
-                
-        p_maxCpu = [el.p_maxCpu for el in self.vnode]
-        pmax = np.max(p_maxCpu)
-        scaled_maxCpu = p_maxCpu / pmax
-        p_maxCpu = torch.from_numpy(np.squeeze(scaled_maxCpu ))
-        p_maxCpu = torch.unsqueeze(p_maxCpu, dim=0).numpy()
-        
-        features = np.transpose(np.concatenate((cpu, bw, bw_av, bw_max, bw_min, degree,p_maxCpu)))
-        
+        bw_av = np.array([el.bw / el.degree for el in self.vnode], dtype=np.float32)
+        bw_av /= bw_av.max() if bw_av.max() != 0 else 1
+        bw_av = bw_av.reshape(1, -1)
+
+        bw_max = np.array([el.max_bw(self.vedege) for el in self.vnode], dtype=np.float32)
+        bw_max /= bw_max.max() if bw_max.max() != 0 else 1
+        bw_max = bw_max.reshape(1, -1)
+
+        bw_min = np.array([el.min_bw(self.vedege) for el in self.vnode], dtype=np.float32)
+        bw_min /= bw_min.max() if bw_min.max() != 0 else 1
+        bw_min = bw_min.reshape(1, -1)
+
+        # rel = np.array([el.max_rel(self.vedege) for el in self.vnode], dtype=np.float32)
+        # rel /= rel.max() if rel.max() != 0 else 1
+        # rel = rel.reshape(1, -1)
+
+        degree = np.array([el.degree for el in self.vnode], dtype=np.float32)
+        degree /= degree.max() if degree.max() != 0 else 1
+        degree = degree.reshape(1, -1)
+
+        p_maxCpu = np.array([el.p_maxCpu for el in self.vnode], dtype=np.float32)
+        p_maxCpu /= p_maxCpu.max() if p_maxCpu.max() != 0 else 1
+        p_maxCpu = p_maxCpu.reshape(1, -1)
+
+        # Final feature stacking
+        features = np.concatenate(
+            (cpu, bw, bw_av, bw_max, bw_min, rel, degree, p_maxCpu),
+            axis=0
+        ).T
+        # print('features', features)
         return features
+
     def getFeatures2(self):
         """ 
         Extracts and scales various features from the VNR's VNFs for use in a feature extraction architecture,

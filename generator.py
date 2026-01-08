@@ -38,7 +38,7 @@ class Generator():
     """ 
     A class responsible for generating Virtual Network Requests (VNRs).
     """
-    def __init__(self,vnr_classes,mlt,mtbs,mtba,vnfs_range,vcpu_range,vbw_range,vlt_range,flavor_tab,p_flavors,nb_solvers):
+    def __init__(self,vnr_classes,mlt,mtbs,mtba,vnfs_range,vcpu_range,vbw_range,vlt_range,vrel_range,flavor_tab,p_flavors,nb_solvers):
 
         self.vnr_classes=vnr_classes
         """
@@ -75,6 +75,10 @@ class Generator():
         self.vlt_range=vlt_range
         """ 
         Latency associated with Vedges (currently unused in this version). 
+        """
+        self.vrel_range = vrel_range
+        """ 
+        The range of reliability value of each Vedge within the VNR.
         """
         self.flavor_tab=flavor_tab
         """  The flavor of a VNF is a predefined range of CPU capacity options that the VNF can request based on its scaling needs, Each flavor is a multiple of the base CPU (i*self.cpu), 
@@ -148,7 +152,7 @@ class Generator():
             vnr_class = self.vnr_ClassGenrator()
             duration  = np.random.exponential(self.mlt[vnr_class])
             flavor_size=self.generate_flavor()
-            request = VNR(self.vnfs_range,self.vcpu_range,self.vbw_range,self.vlt_range,flavor_size,duration,self.mtbs[vnr_class])
+            request = VNR(self.vnfs_range,self.vcpu_range,self.vbw_range,self.vlt_range,self.vrel_range,flavor_size,duration,self.mtbs[vnr_class])
             for i in range(self.nb_solvers):
                 vnr=dc(request)
                 vnrs.append(vnr)
@@ -159,5 +163,5 @@ class Generator():
                 VNRSS[i].num_reqs+=1
             del request        
             env.process(manoSimulator.vnr_life_cycle(VNRSS,vnrs))
-        
-        
+        # print('VNRSS:', VNRSS)
+        # print('vnrs:', vnrs)
