@@ -111,3 +111,4 @@ The simulation parameters can be configured in the configuration file (parameter
 This section configures the simulator to handle diverse scenarios by varying resource demands, VNF properties, and solver behaviors. These options enable controlled experimentation across various placement and scalability strategies.
 
 
+# Reliability_Simulator_
