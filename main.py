@@ -2,6 +2,7 @@ from generator import *
 from mano import ManoSimulator
 from solver import *
 from substrate import SN
+from grasp_solver import Grasp
 import matplotlib.pyplot as plt
 from termcolor import colored
 import simpy
@@ -30,12 +31,15 @@ cpu_range = json_object['cpu_range']
 numnodes = json_object['numnodes']
 bw_range = json_object['bw_range']
 lt_range = json_object['lt_range']
+reliability_range_sn = json_object.get('reliability_range_sn', [0.85, 0.99])
 # Virtual network related parameters
 num_reqs = json_object['num_reqs'] # number of simultaneous requests for the vnr generator
 vnfs_range =json_object['vnfs_range']
 vcpu_range =json_object['vcpu_range']
 vbw_range =json_object['vbw_range']
 vlt_range = json_object['vlt_range']
+reliability_range_vnr = json_object.get('reliability_range_vnr', [0.90, 0.99])
+vnr_reliability_weight = json_object.get('vnr_reliability_weight', 0.15)
 start_mean_calculation=json_object['start_mean_calculation']
 MTBA = json_object['MTBA']     # Mean Time Between Arrival
 MLT=json_object['MLT']         # Mean life time of each cass of VNR
@@ -57,7 +61,7 @@ Seeds = [317805,7671309,222111,310320]#np.random.randint(42947296, size=REPEAT_E
 # Create a substrate environment
 topology  = 'generated_network.matrix'
 topology =  nx.Graph(np.loadtxt(topology, dtype=int))
-old_subNet= SN(numnodes, cpu_range, bw_range,lt_range,topology)
+old_subNet= SN(numnodes, cpu_range, bw_range,lt_range,topology, reliability_range_sn)
 
 old_subNet.drawSN(edege_label=True)
 old_subNet.msg()
@@ -80,11 +84,11 @@ for j in range(len(MTBA)):
         sns.append(dc(old_subNet))
         solvers_names.append(solvers_inputs[i]["name"])
         if solvers_inputs[i]["type"]=="FF":
-            solvers.append(FirstFit(solvers_inputs[i]["sigma"],solvers_inputs[i]["rejection_penalty"]))
+            solvers.append(FirstFit(solvers_inputs[i]["sigma"],solvers_inputs[i]["rejection_penalty"], vnr_reliability_weight))
         if solvers_inputs[i]["type"]=="GNNDRL":
-            solvers.append(GNNDRL(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"]  ))
+            solvers.append(GNNDRL(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"], vnr_reliability_weight))
         if solvers_inputs[i]["type"]=="GNNDRL2":
-            solvers.append(GNNDRL2(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"] ))
+            solvers.append(GNNDRL2(solvers_inputs[i]['sigma'],solvers_inputs[i]["gamma"],solvers_inputs[i]["rejection_penalty"],  solvers_inputs[i]["learning_rate"], solvers_inputs[i]["epsilon"], solvers_inputs[i]["memory_size"], solvers_inputs[i]["batch_size"], solvers_inputs[i]["num_inputs_sn"], solvers_inputs[i]["num_inputs_vnr"], solvers_inputs[i]["hidden_size"], solvers_inputs[i]["GCN_out"], solvers_inputs[i]["num_actions"],solvers_inputs[i]["max_itteration"],solvers_inputs[i]["eps_min"] , solvers_inputs[i]["eps_dec"], None, None, None, vnr_reliability_weight))
         if solvers_inputs[i]["type"]=="GNNDRLPPO":
             solvers.append(GNNDRLPPO(
                 solvers_inputs[i]['sigma'],
@@ -104,14 +108,23 @@ for j in range(len(MTBA)):
                 solvers_inputs[i]["eps_dec"],
                 solvers_inputs[i].get("clip_ratio", 0.2),
                 solvers_inputs[i].get("ppo_epochs", 4),
-                solvers_inputs[i].get("entropy_coef", 0.01)
+                solvers_inputs[i].get("entropy_coef", 0.01),
+                vnr_reliability_weight
+            ))
+        if solvers_inputs[i]["type"]=="GRASP":
+            solvers.append(Grasp(
+                solvers_inputs[i]["sigma"],
+                solvers_inputs[i]["rejection_penalty"],
+                solvers_inputs[i].get("max_iter", 20),
+                solvers_inputs[i].get("alpha", 0.3),
+                vnr_reliability_weight
             ))
         
     controller=Controller(solvers_names,sns,env,episode_duration,results_location,episode_per_file,max_vnfs)
     global_solver=GlobalSolver(solvers)
     manoSimulator=ManoSimulator(global_solver,solvers_names,sns,env,controller)
     start=time.time()
-    generator=Generator(vnr_classes, MLT, MTBS, MTBA[j], vnfs_range, vcpu_range, vbw_range,vlt_range, flavor_tab, p_flavors,len(solvers_inputs))  
+    generator=Generator(vnr_classes, MLT, MTBS, MTBA[j], vnfs_range, vcpu_range, vbw_range,vlt_range, flavor_tab, p_flavors,len(solvers_inputs), reliability_range_vnr)  
     env.process(generator.VnrGenerator_poisson(env,manoSimulator))
     env.process(controller.simulation_controller())
     # Execute!

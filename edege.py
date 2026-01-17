@@ -36,6 +36,12 @@ class Vedege(Edege):
         """ 
         A list representing the path of physical edges (in the substrate network) that are used to map the virtual edge (in the VNR). 
         Each element in the list corresponds to the index of a physical edge that is part of the mapping.
+        """
+        self.reliability = 0.95
+        """ 
+        The reliability requirement for this virtual edge.
+        Initialized to a default value of 0.95.
+        Range: [0.90, 0.99]
         """  
         
     def __str__(self):
@@ -52,7 +58,13 @@ class Sedege(Edege):
         """ A list of virtual edge indices mapped to this substrate edge. Each element contains the VNR ID and the virtual edge ID. """
         self.open=False
         """If a substrate edge no longer has any mapped virtual edges, it is marked as closed (`open = False`)"""
-        self.mappable_flag = False    
+        self.mappable_flag = False
+        self.reliability = 0.95
+        """ 
+        The reliability of this substrate edge, representing the probability that the link operates correctly.
+        Initialized to a default value of 0.95 and can be set during SN generation.
+        Range: [0.85, 0.99]
+        """    
         
     def __str__(self):
         return {'sedege': self.index, 'bandwidth': self.bandwidth,'lastbandwidth':self.lastbandwidth, 'latency':self.latency, 'nodeindex': self.nodeindex,'vedegeindexs':self.vedegeindexs}

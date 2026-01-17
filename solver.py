@@ -29,7 +29,7 @@ import math
 
 class Solver():
     
-    def __init__(self, sigma,rejection_penalty):
+    def __init__(self, sigma,rejection_penalty, reliability_weight=0.15):
         self.rejection_penalty= rejection_penalty
         """ A variable representing the penalty assigned to the solver if it fails the VNR placement. """
         self.itteration = False
@@ -40,6 +40,12 @@ class Solver():
         It is None if the iteration variable is False, or a positive integer if True"""
         self.sigma=sigma
         """ A parameter used to calculate the reward given to the solver after a successful VNR placement. """
+        self.reliability_weight = reliability_weight
+        """ 
+        Weight for reliability in the objective function.
+        Controls the balance between R2C, load balancing, and reliability.
+        Default: 0.15 (15% of the reward is based on reliability)
+        """
 
         
     def rev2cost(self,vnr):
@@ -64,6 +70,47 @@ class Solver():
             if len(vnr.vedege[i].spc)>1:
                 dup=dup+vnr.vedege[i].bandwidth*(len(vnr.vedege[i].spc)-1)
         return vsum_edeges/(vsum_edeges+dup)
+    
+    def calculateReliability(self, vnr, sn):
+        """
+        Calculate the overall reliability of a VNR placement in the substrate network.
+        
+        The reliability is calculated as the product of:
+        1. Node reliability: Product of reliability of all mapped substrate nodes
+        2. VNF reliability: Product of reliability of all VNFs in the VNR
+        3. Path reliability: Product of reliability of all substrate edges used in the mapping
+        
+        The overall reliability is: Product of all VNF, Node, and Path reliabilities
+        
+        Args:
+            vnr: The virtual network request with mapping information
+            sn: The substrate network containing node and edge information
+            
+        Returns:
+            float: Overall reliability of the placement (between 0 and 1)
+        """
+        # Calculate node mapping reliability (substrate nodes reliability)
+        node_reliability = 1.0
+        for i in range(vnr.num_vnfs):
+            mapped_node_idx = vnr.nodemapping[i]
+            node_reliability *= sn.snode[mapped_node_idx].reliability
+        
+        # Calculate VNF reliability
+        vnf_reliability = 1.0
+        for vnf in vnr.vnode:
+            vnf_reliability *= vnf.reliability
+        
+        # Calculate path reliability (substrate edges reliability)
+        path_reliability = 1.0
+        for vedge_idx, vedge in enumerate(vnr.vedege):
+            if vedge.spc:  # If the edge has been mapped
+                for sedge_idx in vedge.spc:
+                    path_reliability *= sn.sedege[sedge_idx].reliability
+        
+        # Overall reliability is the product of all components
+        overall_reliability = node_reliability * vnf_reliability * path_reliability
+        
+        return overall_reliability
     
     
     def shortpath(self,G,fromnode,tonode,weight=None):
@@ -190,7 +237,13 @@ class Solver():
     def getReward(self,vnr,sn):
         """
         Calculates the reward for placing a virtual network request (VNR) in the substrate network. 
-        The reward is computed as: Reward = sigma * R2C + (1 - sigma) * e^(-p_load)
+        The reward is computed as a weighted combination of:
+        - R2C (Revenue-to-Cost ratio)
+        - Load balancing factor (e^(-p_load))
+        - Reliability of the placement
+
+        Reward = (1 - reliability_weight) * [sigma * R2C + (1 - sigma) * e^(-p_load) * balance_factor] 
+                 + reliability_weight * overall_reliability
 
         Args:
             vnr: The virtual network request 
@@ -200,39 +253,38 @@ class Solver():
             tuple: A tuple containing:
                 - r2c (float): The revenue-to-cost ratio for the placement of the VNR.
                 - p_load (float): The average p_load of the substrate nodes involved in the VNR placement.
-                - reward (float): The calculated reward based on the revenue-to-cost ratio and the average p_load.
+                - reward (float): The calculated reward based on the revenue-to-cost ratio, load balance, and reliability.
         """    
-        r2c=self.rev2cost(vnr)
-        '''
-        p_load=0
-        for i in range(vnr.num_vnfs):
-            p_load=p_load+sn.snode[vnr.nodemapping[i]].p_load
-        p_load=p_load/vnr.num_vnfs
+        r2c = self.rev2cost(vnr)
         
-        return r2c,p_load,self.sigma*r2c+(1-self.sigma)/math.exp(p_load)
-        '''
-    
         # Collect p_load of all mapped nodes
         p_loads = []
         for i in range(vnr.num_vnfs):
             p_loads.append(sn.snode[vnr.nodemapping[i]].p_load)
         
         p_load_mean = np.mean(p_loads)
-        p_load_std = np.std(p_loads)  # Mesure de variance/équilibre
+        p_load_std = np.std(p_loads)  # Measure of balance/variance
         
-        # Récompenser une distribution équilibrée (faible variance)
-        # Plus l'écart-type est petit, plus balance_factor est proche de 1
-        balance_factor = 1.0 / (1.0 + p_load_std)  # Varie entre 0 et 1
+        # Reward balanced distribution (low variance)
+        # The smaller the standard deviation, the closer balance_factor is to 1
+        balance_factor = 1.0 / (1.0 + p_load_std)  # Ranges between 0 and 1
         
-        reward = self.sigma * r2c + (1 - self.sigma) * math.exp(-p_load_mean) * balance_factor
+        # Calculate the basic reward (R2C + Load balancing)
+        basic_reward = self.sigma * r2c + (1 - self.sigma) * math.exp(-p_load_mean) * balance_factor
         
-        return r2c,p_load_mean,reward
+        # Calculate reliability of the placement
+        overall_reliability = self.calculateReliability(vnr, sn)
+        
+        # Combine basic reward with reliability as weighted objective
+        final_reward = (1 - self.reliability_weight) * basic_reward + self.reliability_weight * overall_reliability
+        
+        return r2c, p_load_mean, final_reward
     
     
 class GNNDQN(Solver):
     
-    def __init__(self, sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec ):
-        super().__init__(sigma,rejection_penalty)
+    def __init__(self, sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec , reliability_weight=0.15):
+        super().__init__(sigma,rejection_penalty, reliability_weight)
         
         self.saved_reward= None
         """ 
@@ -536,8 +588,8 @@ class GNNDQN(Solver):
 
 class GNNDRL(Solver):
     
-    def __init__(self, sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec):
-        super().__init__(sigma,rejection_penalty)
+    def __init__(self, sigma,gamma,rejection_penalty,  learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,max_itteration,eps_min , eps_dec, reliability_weight=0.15):
+        super().__init__(sigma,rejection_penalty, reliability_weight)
 
         self.agent=Agent(gamma, learning_rate, epsilon, memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,eps_min, eps_dec )
         """ The DRL Agent"""
@@ -800,8 +852,8 @@ class GNNDRL(Solver):
 
 class FirstFit(Solver):
     
-    def __init__(self,sigma,rejection_penalty):
-        super().__init__(sigma,rejection_penalty)
+    def __init__(self,sigma,rejection_penalty, reliability_weight=0.15):
+        super().__init__(sigma,rejection_penalty, reliability_weight)
         
     
     def nodemapping(self, sb, vnr):
@@ -949,8 +1001,8 @@ class GNNDRL2(Solver):
     Can also use PPO agent if clip_ratio, ppo_epochs, and entropy_coef are provided."""
     def __init__(self, sigma, gamma, rejection_penalty, learning_rate, epsilon, memory_size, 
                  batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,
-                 max_itteration, eps_min, eps_dec, clip_ratio=None, ppo_epochs=None, entropy_coef=None):
-        super().__init__(sigma, rejection_penalty)
+                 max_itteration, eps_min, eps_dec, clip_ratio=None, ppo_epochs=None, entropy_coef=None, reliability_weight=0.15):
+        super().__init__(sigma, rejection_penalty, reliability_weight)
 
         # Use PPO agent if PPO parameters are provided
         if clip_ratio is not None and ppo_epochs is not None and entropy_coef is not None:
@@ -1128,8 +1180,8 @@ class GNNDRLPPO(Solver):
     def __init__(self, sigma, gamma, rejection_penalty, learning_rate, epsilon, 
                  memory_size, batch_size, num_inputs_sn, num_inputs_vnr, hidden_size, 
                  GCN_out, num_actions, max_itteration, eps_min, eps_dec,
-                 clip_ratio=0.2, ppo_epochs=4, entropy_coef=0.01):
-        super().__init__(sigma, rejection_penalty)
+                 clip_ratio=0.2, ppo_epochs=4, entropy_coef=0.01, reliability_weight=0.15):
+        super().__init__(sigma, rejection_penalty, reliability_weight)
         
         from models.PPOAgent import PPOAgent
         

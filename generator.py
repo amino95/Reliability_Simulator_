@@ -38,7 +38,7 @@ class Generator():
     """ 
     A class responsible for generating Virtual Network Requests (VNRs).
     """
-    def __init__(self,vnr_classes,mlt,mtbs,mtba,vnfs_range,vcpu_range,vbw_range,vlt_range,flavor_tab,p_flavors,nb_solvers):
+    def __init__(self,vnr_classes,mlt,mtbs,mtba,vnfs_range,vcpu_range,vbw_range,vlt_range,flavor_tab,p_flavors,nb_solvers,reliability_range=None):
 
         self.vnr_classes=vnr_classes
         """
@@ -91,6 +91,11 @@ class Generator():
         self.nb_solvers=nb_solvers
         """ 
         Number of solvers that will be used to place VNRs in the subnetworks (SN).
+        """
+        self.reliability_range = reliability_range if reliability_range is not None else [0.90, 0.99]
+        """ 
+        The reliability range for VNR nodes and edges.
+        Default: [0.90, 0.99]
         """
 
     def generate_flavor(self):
@@ -148,7 +153,7 @@ class Generator():
             vnr_class = self.vnr_ClassGenrator()
             duration  = np.random.exponential(self.mlt[vnr_class])
             flavor_size=self.generate_flavor()
-            request = VNR(self.vnfs_range,self.vcpu_range,self.vbw_range,self.vlt_range,flavor_size,duration,self.mtbs[vnr_class])
+            request = VNR(self.vnfs_range,self.vcpu_range,self.vbw_range,self.vlt_range,flavor_size,duration,self.mtbs[vnr_class],self.reliability_range)
             for i in range(self.nb_solvers):
                 vnr=dc(request)
                 vnrs.append(vnr)

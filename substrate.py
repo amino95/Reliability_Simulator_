@@ -17,7 +17,7 @@ _DEVICE_CACHE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class SN :
     
-    def __init__(self, num_nodes, cpu_range, bw_range,lt_range,topology):
+    def __init__(self, num_nodes, cpu_range, bw_range,lt_range,topology, reliability_range=None):
 
         self.num_nodes = num_nodes
         """  Total number of nodes in the substrate network"""
@@ -32,11 +32,18 @@ class SN :
         self.numedges = len(self.edges)
         """ Total number of Edges in the SN"""
 
+        # Set default reliability range if not provided
+        if reliability_range is None:
+            reliability_range = [0.85, 0.99]
+
         # Snodes Creation 
         #-------------------------------------------------------------#
         for i in range(self.num_nodes):
             cpu = np.random.randint(cpu_range[0],cpu_range[1])
-            self.snode.append(Snode(i,cpu))
+            sn = Snode(i,cpu)
+            # Initialize Snode reliability
+            sn.reliability = np.random.uniform(reliability_range[0], reliability_range[1])
+            self.snode.append(sn)
         #-------------------------------------------------------------#
 
         # Sedges Creation
@@ -45,7 +52,10 @@ class SN :
             bw = np.random.randint(bw_range[0],bw_range[1])
             lt = np.random.randint(lt_range[0], lt_range[1])
             a_t_b = [self.edges[i][0], self.edges[i][1]]
-            self.sedege.append(Sedege(i, bw,lt, a_t_b))
+            sed = Sedege(i, bw,lt, a_t_b)
+            # Initialize Sedge reliability
+            sed.reliability = np.random.uniform(reliability_range[0], reliability_range[1])
+            self.sedege.append(sed)
             self.snode[a_t_b[0]].links.append(i)
             self.snode[a_t_b[1]].links.append(i)
         #-------------------------------------------------------------#

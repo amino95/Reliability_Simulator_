@@ -85,6 +85,12 @@ class Vnf(Node):
             - If the value is 0, the VNF is not the current one.
             - If the value is 1, the VNF is the current one for placement.
         """
+        self.reliability = 0.95
+        """ 
+        The reliability of this VNF, representing the probability that the VNF operates correctly.
+        Initialized to a default value of 0.95 and can be set during VNR generation.
+        Range: [0.90, 0.99]
+        """
 
     def max_bw(self,edges):
         """
@@ -145,6 +151,12 @@ class Snode(Node):
         """ A list of VNFs hosted on this node, where each entry contains the VNR ID and the corresponding VNF ID in the format [vnr.id,vnf.index]"""
         self.p_load=0
         """ The node's potential load, representing the total potential load from all VNFs hosted on this node. It is calculated as the sum of the maximum potential CPU of each hosted VNF, divided by the node's maximum CPU capacity. """
+        self.reliability = 0.95
+        """ 
+        The reliability of this substrate node, representing the probability that the node operates correctly.
+        Initialized to a default value of 0.95 and can be set during SN generation.
+        Range: [0.85, 0.99]
+        """
         
 
     def __str__(self):

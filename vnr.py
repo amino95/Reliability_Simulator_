@@ -24,7 +24,7 @@ def generate_connected_er_graph(num_nodes, probability):
 class VNR:
     ID_ = 0
     """ A class variable used to assign a unique identifier to each VNR instance.  """
-    def __init__(self,vnf_range, cpu_range, bw_range,lt_range,flavor_size,duration,mtbs):
+    def __init__(self,vnf_range, cpu_range, bw_range,lt_range,flavor_size,duration,mtbs, reliability_range=None):
         VNR.ID_+=1
         self.mtbs=mtbs
         """ Mean time between scale demands that arrive during the VNF lifespan """
@@ -50,6 +50,11 @@ class VNR:
         """ VNFs placement in the Service Network (SN) """
         self.edgemapping = []
         """ Edges placement in the Service Network (SN) """
+        
+        # Set default reliability range if not provided
+        if reliability_range is None:
+            reliability_range = [0.90, 0.99]
+        
         p_scalingUp=int(1/2*duration/mtbs)+1
         """ Potential number of scaling up """
         # VNFs Creation
@@ -57,6 +62,8 @@ class VNR:
         for i in range(self.num_vnfs):
             cpu=np.random.randint(cpu_range[0],cpu_range[1]//2)
             vno = Vnf(i,cpu,cpu_range[1],self.id,flavor_size,p_scalingUp)
+            # Initialize VNF reliability
+            vno.reliability = np.random.uniform(reliability_range[0], reliability_range[1])
             self.vnode.append(vno)
         #----------------------------------------------------------------#
         # Edges Creation
@@ -66,6 +73,8 @@ class VNR:
             bw = np.random.randint(bw_range[0],bw_range[1])
             lt = np.random.randint(lt_range[0],lt_range[1])
             ved = Vedege(i,bw,lt,a_t_b)
+            # Initialize Vedge reliability
+            ved.reliability = np.random.uniform(reliability_range[0], reliability_range[1])
             self.vedege.append(ved)
             self.vnode[a_t_b[0]].links.append(i)
             self.vnode[a_t_b[1]].links.append(i)
