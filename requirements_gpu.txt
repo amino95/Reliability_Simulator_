@@ -1,0 +1,35 @@
+#Step 1 – Create env
+#conda create -n vne python=3.10 -y
+#conda activate vne
+
+#Step 2 – Install PyTorch with CUDA 12.4 (OFFICIAL INDEX)
+#pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+#Step 3 – Install DGL (CUDA 12.4)
+#pip install dgl -i https://data.dgl.ai/wheels/cu124/repo.html
+
+#Step 4 – Install the rest from this file
+#pip install -r requirements_gpu.txt
+
+# ============================================
+# Core Dependencies
+# ============================================
+numpy==1.26.4
+scipy==1.15.3
+pandas==2.2.0
+networkx==3.4.2
+simpy==4.1.1
+termcolor==3.3.0
+tqdm==4.67.1
+matplotlib==3.10.8
+pyyaml==6.0.1
+psutil==6.1.0
+
+# PyTorch + DGL (install separately with CUDA index above)
+# torch==2.5.1
+# torchvision==0.20.1
+# torchaudio==2.5.1
+# dgl==2.5.0
+
+# Utilities
+pydantic==1.10.13
