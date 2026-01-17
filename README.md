@@ -10,7 +10,7 @@ Key components of the simulator include:
 
 1. *GCN-based state extraction:* Extracts topological information of the substrate network and VNF graphs.
 2. *A2C-based DRL agent:* Learns optimal placement strategies, incorporating both immediate resource requirements and future scalability.
-3. *Reward metrics:* Guides placement to maximize efficiency, considering resource cost ratios (R2C) and scalability load (Pload) for effective resource distribution.
+3. *Reward metrics:* Guides placement to maximize efficiency, considering resource cost ratios (R2C), Reliability of the placement and scalability load (Pload) for effective resource distribution.
 
 ## Installation
 
@@ -24,6 +24,7 @@ source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
 2. Install dependencies by running:
 ```bash
 pip install -r requirements.txt
+also install -r requirements_torch.txt 
 ```
 3. Install DGL (Deep Graph Library):
 ```bash
@@ -38,7 +39,8 @@ This simulator is configured to accept VNF requests dynamically. VNF requests ar
 
 * Receives VNF placement requests.
 * Evaluates network resource availability.
-* Calculates optimal placement of VNFs.
+* Calculates optimal placement of VNFs subject to constraints
+* Object functions include optimize R2C and Reliability values
 * Manages resource scaling requests for placed VNFs.
 
 ## Running the Simulator
@@ -91,7 +93,7 @@ The simulation parameters can be configured in the configuration file (parameter
 
 * **solvers**: A list of solvers used in the simulation, each with specific configurations:
     - **name**: Name of the solver configuration.
-    - **type**: Type of solver (e.g., GNNDRL or Firstfit).
+    - **type**: Type of solver (e.g., GNNDRL or Grasp or Firstfit).
     - **sigma**: Scaling factor in the reward function that controls the balance between placement and scalability.
     - **gamma**: Discount factor for future rewards in reinforcement learning.
     - **rejection_penalty**: Penalty value for rejected placements.
@@ -111,3 +113,4 @@ The simulation parameters can be configured in the configuration file (parameter
 This section configures the simulator to handle diverse scenarios by varying resource demands, VNF properties, and solver behaviors. These options enable controlled experimentation across various placement and scalability strategies.
 
 
+# Reliability_Simulator_

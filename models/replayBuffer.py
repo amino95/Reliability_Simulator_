@@ -74,10 +74,6 @@ class ReplayBuffer(object):
         index =  self.mem_cntr % self.mem_size
         self.memory[index] = transition
         self.mem_cntr += 1
-    
-    def store_transition(self, transition):
-        """ Alias for store() method for compatibility with PPOAgent. """
-        self.store(transition)
         
     def sample_buffer(self,batch_size):
         """ 

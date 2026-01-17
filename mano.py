@@ -42,9 +42,9 @@ class ManoSimulator():
         """ The substrate network"""
 
 
-    def integration_test(self,sn,VNRSS,solver_name): 
+    def integration_test(self,sn,VNRSS,solver_name):
         """
-        Integration test to validate the correctness of the VNF placement and resource allocation in the substrate network. 
+        Integration test to validate the correctness of the VNF placement and resource allocation in the substrate network.
         This function is called after each placement, scalability, and VNR termination to ensure the system's integrity.
 
         This function checks:
@@ -59,7 +59,7 @@ class ManoSimulator():
 
         If any of these checks fail, an error message is printed, and the process is terminated.
         """
-        #check if placement in nodes is done correctly 
+        #check if placement in nodes is done correctly
         for snode in sn.snode:
             cpu_used=0
             p_load=0
@@ -75,6 +75,11 @@ class ManoSimulator():
                     print(solver_name)
                     print("VNR ID",vnr.id)
                     print("Vnode_index",vnode[1])
+
+                    print("NODE =", snode.index)
+                    print("vnodeindexs =", vnodeindexs)
+                    print("Checking VNR:", vnr.id, "VNF:", vnode[1])
+                    print("sn_host =", vnr.vnode[vnode[1]].sn_host)
                     print(vnr.vnode[vnode[1]].sn_host,snode.index)
                     sys.exit("bad node palcement")
             if snode.lastcpu+cpu_used != snode.cpu:
@@ -90,7 +95,7 @@ class ManoSimulator():
                 sn.msg()
                 sys.exit("error in pload calculation")
 
-        #check if placement in edeges is done correctly 
+        #check if placement in edeges is done correctly
         for sedege in sn.sedege:
             used_bw=0
             vedegeindexs=sedege.vedegeindexs
@@ -100,24 +105,23 @@ class ManoSimulator():
                 vnr=VNRSS.reqs[VNRindex]
                 if sedege.index  in vnr.vedege[vedege[1]].spc:
                     used_bw+=vnr.vedege[vedege[1]].bandwidth
-                else: 
-                    print(solver_name)
-                    sn.msg()
+                else:
+                    # print(solver_name)
+                    # sn.msg()
                     sys.exit("bad edege palcement")
             if sedege.lastbandwidth+used_bw!= sedege.bandwidth:
-                    print(solver_name)
+                    # print(solver_name)
                     sys.exit("error in bw calculation")
 
         #check lastbw in nodes:
-        # Note: lastbw in nodes is not updated during edge modifications,
-        # so this check is disabled to avoid false positives
-        # for n in sn.snode:
-        #     lastbw = 0
-        #     for e in sn.sedege:
-        #         if n.index in e.nodeindex:
-        #             lastbw += e.lastbandwidth
-        #     if n.lastbw != lastbw:
-        #         sys.exit("error in lastbw calculation in node")
+        for n in sn.snode:
+            lastbw = 0
+            for e in sn.sedege:
+                if n.index in e.nodeindex:
+                    lastbw += e.lastbandwidth
+            if n.lastbw != lastbw:
+                sys.exit("error in lastbw calculation in node")
+
 
 
 
@@ -149,12 +153,16 @@ class ManoSimulator():
         self.controller.save_vnr_state(vnrs)
         #Placement of VNRs
         states =[]
+
         for i in range(len(self.solvers)):
             states.append({'sn':self.subNets[i],'vnr':vnrs[i]})
+            # print('states:', states)
         results = self.global_solver.mapping(states)
-        
+
         #Update Subnets
         for i in range(len(self.solvers)):
+            # print("self.subNets[i]", self.subNets[i])
+            # print("results[i]", results[i])
             self.subNets[i]=results[i]["sn"]
             if not results[i]["success"]:
                 #Drop rejected VNRs
@@ -183,6 +191,8 @@ class ManoSimulator():
                 break
             # Determining the time until the next scaling demand is generated.
             next_scale = np.random.exponential(vnrs[start].mtbs)
+            # scaling : off
+            next_scale = end
             if self.env.now+next_scale < end :
                 scaling_chaine=[]
                 scale_up = False
@@ -237,8 +247,7 @@ class ManoSimulator():
                                 self.controller.scaling_result(i,scale_results)
 
                                 #Integration test
-                                if self.subNets[i] is not None:
-                                    self.integration_test(self.subNets[i],VNRSS[i],self.solvers[i])
+                                self.integration_test(self.subNets[i],VNRSS[i],self.solvers[i])
             # No scaling 
             else: 
                 # Wait until the end of the VNR's lifetime duration.
@@ -252,7 +261,5 @@ class ManoSimulator():
         
         # Global Intergarion test
         for i in range(len(self.solvers)):
-            self.integration_test(self.subNets[i],VNRSS[i],self.solvers[i])  
-        
+            self.integration_test(self.subNets[i],VNRSS[i],self.solvers[i])
 
-   

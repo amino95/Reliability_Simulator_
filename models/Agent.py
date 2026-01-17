@@ -45,7 +45,6 @@ class Transition(object):
 class Agent(object):
     
     def __init__(self,gamma,learning_rate,epsilon,memory_size,batch_size,num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, num_actions,eps_min = 0.01, eps_dec = 5.5e-5):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gamma = gamma
         """ Discount Factor """
         self.epsilon = epsilon
@@ -65,22 +64,9 @@ class Agent(object):
         self.eps_dec = eps_dec
         """ The amount by which the exploration rate (epsilon) decreases with each step in the learning process. """
         self.learn_step_counter = 0
-        self.A2C=GNNA2C(num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, learning_rate,num_actions, device=self.device)
         
-        # Mixed precision training
-        self.use_amp = torch.cuda.is_available()
-        self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
-        
-        # Gradient accumulation
-        self.gradient_accumulation_steps = 4
-        self.accumulation_counter = 0
-        
-        # Compile model for faster execution (PyTorch 2.0+)
-        try:
-            if hasattr(torch, 'compile'):
-                self.A2C.model = torch.compile(self.A2C.model, mode='reduce-overhead')
-        except Exception:
-            pass  # Fallback if compilation not supported
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") #selecting GPU if available
+        self.A2C = GNNA2C(num_inputs_sn, num_inputs_vnr, hidden_size, GCN_out, learning_rate,num_actions).to(self.device)
  
         
     def store_transition(self,transition):
@@ -105,7 +91,8 @@ class Agent(object):
             # Get the estimated value and policy distribution from the A2C model
             value,policy_dist= self.A2C([observation])
             # Clone the probability distribution for manipulation
-            probs = policy_dist[0].clone()
+            probs = policy_dist[0].clone()  
+            probs.detach()
  
             # Epsilon-greedy action selection
             if  np.random.random() < self.epsilon:
@@ -136,6 +123,9 @@ class Agent(object):
 
 
     def learn(self):
+        # Enable anomaly detection for debugging
+        torch.autograd.set_detect_anomaly(True)
+
         # Return early if we haven't collected enough experiences
         if self.memory.mem_cntr < self.memory_init:
             return
@@ -143,67 +133,40 @@ class Agent(object):
         # Sample a batch of experiences from memory
         states, actions,rewards, dones, next_values,transition_lens = self.memory.sample_buffer(self.batch_size)
         
-        # Use automatic mixed precision for faster training
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
-            # Get predicted values and policy distributions from the A2C model
-            values, policy_dists = self.A2C(states)
+        # Get predicted values and policy distributions from the A2C model
+        values, policy_dists = self.A2C(states)
 
-            # Compute log probabilities of the actions taken using log_softmax for numerical stability
-            log_probs = torch.stack([torch.log(policy_dist[actions[i]].clamp(min=1e-8)) for i, policy_dist in enumerate(policy_dists)])
-            
-            # Initialize target Q-value from the last next value
-            q_val = next_values[len(next_values)-1]
-            if isinstance(q_val, torch.Tensor):
-                q_val = q_val.detach().to(self.device).squeeze()
-            else:
-                q_val = torch.tensor(q_val, device=self.device, dtype=torch.float32).squeeze()
-
-            lenght = len(rewards) 
-            q_vals = torch.zeros(lenght, device=self.device)
-            # Pre-create tensors outside loop to avoid repeated allocations
-            rewards_t = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
-            dones_t = torch.as_tensor(dones, dtype=torch.float32, device=self.device)
-              
-            # Optimized: target values are calculated backward with episode boundary handling
-            j = len(next_values) - 1
-            k = 0
-            for i in range(lenght - 1, -1, -1):
-                reward = rewards_t[i]
-                done = dones_t[i]
-                q_val = reward + self.gamma * q_val * (1.0 - done)
-                q_vals[i] = q_val
-                k += 1
-                if k == transition_lens[j]:
-                    j -= 1
-                    k = 0
-                    if j >= 0:
-                        q_val = next_values[j]
-                        if isinstance(q_val, torch.Tensor):
-                            q_val = q_val.detach().to(self.device).squeeze()
-                        else:
-                            q_val = torch.tensor(q_val, device=self.device, dtype=torch.float32).squeeze()
-
-            advantage = q_vals - values.squeeze()
-            critic_loss = advantage.pow(2).mean()
-            actor_loss = (-log_probs * advantage.detach()).mean()
-            actor_critic_loss = (critic_loss + actor_loss) / self.gradient_accumulation_steps
-
-        # Gradient accumulation: only update weights every N steps
-        if self.use_amp:
-            self.scaler.scale(actor_critic_loss).backward()
-        else:
-            actor_critic_loss.backward()
+        # Compute log probabilities of the actions taken
+        log_probs =[]
+        for i, policy_dist in enumerate(policy_dists):
+            log_probs.append(torch.log(policy_dist[actions[i]]))
         
-        self.accumulation_counter += 1
-        
-        if self.accumulation_counter >= self.gradient_accumulation_steps:
-            if self.use_amp:
-                self.scaler.step(self.A2C.optimizer)
-                self.scaler.update()
-            else:
-                self.A2C.optimizer.step()
-            
-            self.A2C.optimizer.zero_grad()
-            self.accumulation_counter = 0
-            
+        # Initialize target Q-value from the last next value
+        q_val = next_values[len(next_values)-1]
+        lenght= len(rewards) 
+        q_vals = np.zeros((lenght, 1))
+          
+        # target values are calculated backward
+        # it's super important to handle correctly done states,
+        # for those cases we want our to target to be equal to the reward only
+        j = len(next_values)-1
+        k = 0
+        for i, reward in enumerate(rewards[::-1]):
+            done = dones[lenght-1 - i]
+            q_val = reward + self.gamma*q_val*(1.0-done)
+            q_vals[lenght-1 - i] = q_val # store values from the end to the beginning
+            k+=1
+            if k == transition_lens[j]:
+                j-= 1
+                k = 0
+                q_val = next_values[j]
+
+        advantage = torch.tensor(q_vals, device=self.device).squeeze() - values.squeeze()
+        critic_loss = advantage.pow(2).mean()
+        actor_loss = (-torch.stack(log_probs)*advantage.detach()).mean()
+        actor_critic_loss = critic_loss+actor_loss 
+
+        self.A2C.optimizer.zero_grad()
+        actor_critic_loss.backward()
+        self.A2C.optimizer.step()
         self.decrement_epsilon()
