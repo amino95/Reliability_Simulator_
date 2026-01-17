@@ -1,0 +1,5 @@
+{
+    "github.copilot.editor.enableAutoCompletions": true,
+    "github.copilot.chat.localeOverride": "fr",
+    "workbench.panel.defaultLocation": "right"
+}
